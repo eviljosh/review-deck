@@ -798,6 +798,23 @@ tr.dl-hunk { background: var(--accent-soft); color: var(--accent); }
 tr.dl-hunk .dl-text { font-size: 11px; padding: 2px 6px; }
 tr.dl-widget > td { padding: 6px 10px 6px 46px; background: var(--bg); border-top: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 
+/* context expansion (GitHub-style) */
+tr.dl-expander {
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  user-select: none;
+}
+tr.dl-expander:hover { background: #cbe7ff; }
+tr.dl-expander .dl-text { font-size: 11px; padding: 3px 6px; }
+tr.dl-expander .dl-no { color: var(--accent); text-align: center; }
+tr.dl-revealed { background: var(--surface); }
+tr.dl-revealed .dl-no { opacity: 0.55; }
+
+.run-clickable { cursor: pointer; }
+.run-clickable:hover { background: var(--surface-subtle); }
+.run-output { margin: 4px 0 8px; max-height: 360px; }
+
 .wt-finding {
   background: var(--surface); border: 1px solid var(--border); border-left-width: 3px;
   border-radius: var(--radius); padding: 8px 10px; font-family: var(--sans); font-size: 13px;

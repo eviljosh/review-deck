@@ -107,7 +107,7 @@ test("runSynthesize stores the finalizer's file reading guide", async () => {
   ]);
 });
 
-test("runSynthesize feeds past rejected examples for the repo into the finalizer", async () => {
+test("runSynthesize feeds past rejected examples into the finalizer only when enabled", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
   db.prepare(
@@ -119,10 +119,18 @@ test("runSynthesize feeds past rejected examples for the repo into the finalizer
     return { text: JSON.stringify({ findings: [] }) };
   } };
   await runSynthesize(
-    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), feedbackEnabled: true, onUpdate: () => {} },
     pr.id, raw,
   );
   assert.match(seenSystem, /missing test for logging/);
+
+  // default (flag off): the stored examples are NOT injected
+  seenSystem = "";
+  await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id, raw,
+  );
+  assert.doesNotMatch(seenSystem, /missing test for logging/);
 });
 
 test("runSynthesize with empty raw findings advances to ready with none", async () => {

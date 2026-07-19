@@ -425,6 +425,46 @@ test("GET /api/prs/:id/review.md serves the review brief as markdown", async () 
   assert.equal(missing.statusCode, 404);
 });
 
+test("GET /api/prs/:id/file serves pinned file content and rejects bad paths", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  const baseExec = d.exec;
+  d.exec = async (cmd, args, opts) => { calls.push([cmd, ...args]); return baseExec(cmd, args, opts); };
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  updatePr(d.db, pr.id, { head_sha: "abc123" });
+
+  const res = await app.inject({ method: "GET", url: `/api/prs/${pr.id}/file?path=src/x.ts` });
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.json().content.length > 0);
+  assert.ok(calls.some((c) => c.join(" ").includes("show abc123:src/x.ts")));
+
+  const bad = await app.inject({ method: "GET", url: `/api/prs/${pr.id}/file?path=../../etc/passwd` });
+  assert.equal(bad.statusCode, 400);
+  const abs = await app.inject({ method: "GET", url: `/api/prs/${pr.id}/file?path=/etc/passwd` });
+  assert.equal(abs.statusCode, 400);
+});
+
+test("GET /api/prs/:id/runs/:rid/output returns the persisted stream + error", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  const { startRun, finishRun } = await import("../src/server/db.ts");
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const dir = mkdtempSync(`${process.env.SCRATCH ?? "/tmp"}/run-out-`);
+  writeFileSync(`${dir}/task.log.txt`, "streamed agent output here");
+  const rid = startRun(d.db, pr.id, "deep_review · claude/security");
+  finishRun(d.db, rid, "failed", "engine timed out", `${dir}/task.log.txt`);
+
+  const res = await app.inject({ method: "GET", url: `/api/prs/${pr.id}/runs/${rid}/output` });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().error, "engine timed out");
+  assert.equal(res.json().output, "streamed agent output here");
+
+  const missing = await app.inject({ method: "GET", url: `/api/prs/${pr.id}/runs/99999/output` });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("GET/PUT /api/settings round-trips a config patch", async () => {
   const app = buildApp(deps());
   const before = await app.inject({ method: "GET", url: "/api/settings" });

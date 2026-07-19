@@ -14,6 +14,7 @@ export interface ReviewSettings {
   codexReasoningEffort?: string;
   engineTimeoutMs: number;
   robotMarker: string;
+  feedbackLoop: boolean;
 }
 export interface RepoConfig {
   id: number;
@@ -127,6 +128,24 @@ export async function getRuns(id: number): Promise<RunRecord[]> {
   const res = await fetch(`/api/prs/${id}/runs`);
   if (!res.ok) return [];
   return res.json();
+}
+
+export interface RunOutput {
+  stage: string;
+  status: string;
+  error: string | null;
+  output: string | null;
+}
+export async function getRunOutput(prId: number, rid: number): Promise<RunOutput> {
+  const res = await fetch(`/api/prs/${prId}/runs/${rid}/output`);
+  if (!res.ok) throw new Error(`run output failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getFileContent(prId: number, path: string): Promise<string> {
+  const res = await fetch(`/api/prs/${prId}/file?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error(`file load failed: ${res.status}`);
+  return (await res.json()).content ?? "";
 }
 
 export async function getDiff(id: number): Promise<string> {

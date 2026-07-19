@@ -55,7 +55,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [sort, setSort] = useState<SortKey>("danger");
+  const [sort, setSort] = useState<SortKey>("recent");
   // Selection is deep-linked in the URL hash (#pr-<id>) so it survives reload
   // and can be bookmarked/shared.
   const [selected, setSelected] = useState<number | null>(hashPrId);
@@ -189,8 +189,8 @@ export function App() {
           <label className="sort-control">
             Sort
             <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="danger">Danger</option>
               <option value="recent">Recent</option>
+              <option value="danger">Danger</option>
               <option value="repo">Repo</option>
             </select>
           </label>

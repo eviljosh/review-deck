@@ -7,6 +7,7 @@ import {
   getDefaultPreface,
   listComments,
   getFindings,
+  getRunOutput,
   getRuns,
   postReview,
   refreshStatus,
@@ -217,6 +218,30 @@ export function PrDetail({
   useEffect(() => {
     getRuns(pr.id).then(setRuns).catch(() => {});
   }, [pr.id, findingsBump]);
+
+  // While a pipeline is running, poll the runs timeline so new stages and
+  // engine sub-runs appear live (there's no per-run WS event).
+  useEffect(() => {
+    if (pr.status !== "running") return;
+    const t = setInterval(() => getRuns(pr.id).then(setRuns).catch(() => {}), 3000);
+    return () => clearInterval(t);
+  }, [pr.id, pr.status]);
+
+  // Expanded run output (click a run row to inspect its persisted stream).
+  const [runView, setRunView] = useState<{ rid: number; text: string } | null>(null);
+  async function toggleRunOutput(r: RunRecord) {
+    if (runView?.rid === r.id) { setRunView(null); return; }
+    try {
+      const o = await getRunOutput(pr.id, r.id);
+      const parts = [
+        o.error ? `── error ──\n${o.error}` : null,
+        o.output?.trim() ? `── streamed output ──\n${o.output}` : null,
+      ].filter(Boolean);
+      setRunView({ rid: r.id, text: parts.length ? parts.join("\n\n") : "(no output captured for this run)" });
+    } catch (e) {
+      setRunView({ rid: r.id, text: String(e) });
+    }
+  }
 
   const [preface, setPreface] = useState("");
   useEffect(() => {
@@ -532,16 +557,25 @@ export function PrDetail({
             <ul className="runs">
               {runs.map((r) => {
                 const duration = formatDuration(r.started_at, r.ended_at);
+                const inspectable = !!r.error || !!r.artifact_path;
                 return (
-                  <li key={r.id} className="run-item">
-                    <StatusPill status={r.status} />
-                    <span className="run-stage">{r.stage}</span>
-                    {duration ? (
-                      <span className="run-dur">{duration}</span>
-                    ) : r.status === "running" ? (
-                      <span className="run-dur">{liveElapsed(r.started_at, now)}</span>
-                    ) : null}
-                    {r.error && <span className="run-dur" title={r.error}>⚠</span>}
+                  <li key={r.id}>
+                    <div
+                      className={`run-item ${inspectable ? "run-clickable" : ""}`}
+                      title={inspectable ? "Click to inspect this run's output" : undefined}
+                      onClick={inspectable ? () => toggleRunOutput(r) : undefined}
+                    >
+                      <StatusPill status={r.status} />
+                      <span className="run-stage">{r.stage}</span>
+                      {duration ? (
+                        <span className="run-dur">{duration}</span>
+                      ) : r.status === "running" ? (
+                        <span className="run-dur">{liveElapsed(r.started_at, now)}</span>
+                      ) : null}
+                      {r.error && <span className="run-dur" title={r.error}>⚠</span>}
+                      {inspectable && <span className="run-dur">{runView?.rid === r.id ? "▾" : "▸"}</span>}
+                    </div>
+                    {runView?.rid === r.id && <pre className="log run-output">{runView.text}</pre>}
                   </li>
                 );
               })}

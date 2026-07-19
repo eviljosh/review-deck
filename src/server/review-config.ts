@@ -38,6 +38,13 @@ export interface ReviewConfig {
   engineTimeoutMs: number;
   /** Disclosure line prepended to every posted review. */
   robotMarker: string;
+  /**
+   * Feedback loop: record which findings you accept/reject at post time and
+   * feed recent rejections back to the finalizer so similar findings get
+   * deprioritized on later reviews of the same repo. Off by default — the
+   * injected examples steer the model, so opt in deliberately.
+   */
+  feedbackLoop: boolean;
 }
 
 export const DEFAULT_DIMENSIONS: DimensionDef[] = [
@@ -73,6 +80,7 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   engineTimeoutMs: 600_000,
   robotMarker:
     "🤖 The rest of this review is AI-generated — an automated review posted at the reviewer's request. It is not a human review.",
+  feedbackLoop: false,
 };
 
 export const REVIEW_CONFIG_KEY = "review_config";

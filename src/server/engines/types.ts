@@ -26,7 +26,7 @@ export interface LlmEngine {
 // depend on the concrete SDK types.
 export interface AgentMessage {
   type: string;
-  message?: { content: Array<{ type: string; text?: string }> };
+  message?: { content: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
   subtype?: string;
   result?: string;
   is_error?: boolean;

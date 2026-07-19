@@ -29,20 +29,28 @@ async function recordStage<T>(
   stage: string,
   aborted: () => boolean,
   fn: () => Promise<T>,
+  onLog?: (prId: number, stage: string, chunk: string) => void,
 ): Promise<T> {
   const rid = startRun(db, prId, stage);
   const t0 = Date.now();
   console.log(`[pr ${prId}] ${stage} — started`);
+  // Mirror stage transitions into the live log so the UI always shows
+  // progress, even before an engine emits its first token.
+  onLog?.(prId, stage, `[pipeline] ${stage} — started\n`);
   try {
     const r = await fn();
     finishRun(db, rid, "done");
-    console.log(`[pr ${prId}] ${stage} — done (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(`[pr ${prId}] ${stage} — done (${secs}s)`);
+    onLog?.(prId, stage, `[pipeline] ${stage} — done (${secs}s)\n`);
     return r;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status = aborted() ? "cancelled" : "failed";
     finishRun(db, rid, status, message);
-    console.error(`[pr ${prId}] ${stage} — ${status} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${message}`);
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    console.error(`[pr ${prId}] ${stage} — ${status} (${secs}s): ${message}`);
+    onLog?.(prId, stage, `[pipeline] ${stage} — ${status} (${secs}s): ${message}\n`);
     throw err;
   }
 }
@@ -104,7 +112,7 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
   const needPrepare = resumeIdx <= 0 || !existing?.worktree_path || !existsSync(existing.worktree_path);
   if (needPrepare) {
     try {
-      await recordStage(db, prId, "prepare", aborted, () => runPrepare({ db, exec, dataDir, onUpdate, onLog }, prId));
+      await recordStage(db, prId, "prepare", aborted, () => runPrepare({ db, exec, dataDir, onUpdate, onLog }, prId), onLog);
     } catch (err) { onStageError("prepare", err); return; }
   } else {
     onLog(prId, resumeFrom!, `[pipeline] resuming from ${resumeFrom} — reusing earlier prepare\n`);
@@ -113,7 +121,7 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
   if (checkpoint()) return;
   if (resumeIdx <= 1) {
     try {
-      await recordStage(db, prId, "triage", aborted, () => runTriage({ db, exec, engine: claude, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, claude.name), signal, timeoutMs: config.engineTimeoutMs, riskFlags: config.riskFlags }, prId));
+      await recordStage(db, prId, "triage", aborted, () => runTriage({ db, exec, engine: claude, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, claude.name), signal, timeoutMs: config.engineTimeoutMs, riskFlags: config.riskFlags }, prId), onLog);
     } catch (err) { onStageError("triage", err); return; }
   }
 
@@ -125,14 +133,14 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
     onLog(prId, "synthesize", `[pipeline] reusing ${raw.length} raw finding(s) from the previous deep review\n`);
   } else {
     try {
-      raw = await recordStage(db, prId, "deep_review", aborted, () => runDeepReview({ db, exec, claude, codex, config, dataDir, onUpdate, onLog, signal }, prId));
+      raw = await recordStage(db, prId, "deep_review", aborted, () => runDeepReview({ db, exec, claude, codex, config, dataDir, onUpdate, onLog, signal }, prId), onLog);
     } catch (err) { onStageError("deep review", err); return; }
   }
 
   if (checkpoint()) return;
   const finalizer = config.finalizerEngine === "codex" ? codex : claude;
   try {
-    await recordStage(db, prId, "synthesize", aborted, () => runSynthesize({ db, exec, finalizer, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, finalizer.name), signal, timeoutMs: config.engineTimeoutMs }, prId, raw));
+    await recordStage(db, prId, "synthesize", aborted, () => runSynthesize({ db, exec, finalizer, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, finalizer.name), signal, timeoutMs: config.engineTimeoutMs, feedbackEnabled: config.feedbackLoop }, prId, raw), onLog);
     hub.broadcast({ type: "findings_updated", prId });
   } catch (err) { onStageError("synthesize", err); return; }
 }

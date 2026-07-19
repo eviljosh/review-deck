@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
-import { addComment, getDiff, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
-import { parseUnifiedDiff, type DiffFile } from "./diffParse.ts";
+import { addComment, getDiff, getFileContent, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
+import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
@@ -18,6 +18,71 @@ function parseGuide(json: string | null): FileGuideEntry[] {
 }
 
 const SEV_DOT: Record<string, string> = { blocking: "●", serious: "●", moderate: "○", optional: "○" };
+
+const EXPAND_STEP = 20;
+
+// Display rows for one file's diff: the parsed diff lines, plus GitHub-style
+// expanders for the context gaps between/around hunks and the lines revealed
+// by clicking them (sourced from the file at the reviewed commit).
+type DiffRow =
+  | { kind: "line"; line: DiffLine; idx: number }
+  | { kind: "expanded"; oldNo: number | null; newNo: number; text: string }
+  | { kind: "expander"; dir: "up" | "tail"; key: string; remaining: number };
+
+function buildDiffRows(
+  file: DiffFile,
+  content: string[] | null | undefined, // undefined = not loaded yet, null = unavailable
+  revealUp: Record<string, number>,
+  revealTail: Record<string, number>,
+): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let lastNew = 0;   // last new-side line number emitted
+  let lastDelta = 0; // old-minus-new offset of the most recent hunk
+
+  file.lines.forEach((l, idx) => {
+    if (l.kind === "hunk") {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l.text);
+      const newStart = m ? Number(m[2]) : 0;
+      const delta = m ? Number(m[1]) - Number(m[2]) : 0;
+      const gapStart = lastNew + 1;
+      const gapEnd = newStart - 1;
+      const gap = gapEnd - gapStart + 1;
+      if (gap > 0 && content !== null) {
+        const key = `${file.path}@${idx}`;
+        const revealed = Math.min(revealUp[key] ?? 0, gap);
+        if (gap - revealed > 0) rows.push({ kind: "expander", dir: "up", key, remaining: gap - revealed });
+        if (revealed > 0 && content) {
+          // reveal upward from the hunk: the bottom `revealed` lines of the gap
+          for (let n = gapEnd - revealed + 1; n <= gapEnd; n++) {
+            rows.push({ kind: "expanded", oldNo: n + delta, newNo: n, text: content[n - 1] ?? "" });
+          }
+        }
+      }
+      lastDelta = delta;
+      rows.push({ kind: "line", line: l, idx });
+    } else {
+      rows.push({ kind: "line", line: l, idx });
+      if (l.newNo !== null) lastNew = l.newNo;
+    }
+  });
+
+  // Trailing context after the last hunk (not for deletions — no new side).
+  if (file.status !== "deleted" && content !== null) {
+    const revealed = revealTail[file.path] ?? 0;
+    if (content) {
+      const avail = Math.max(0, content.length - lastNew);
+      const shown = Math.min(revealed, avail);
+      for (let n = lastNew + 1; n <= lastNew + shown; n++) {
+        rows.push({ kind: "expanded", oldNo: n + lastDelta, newNo: n, text: content[n - 1] ?? "" });
+      }
+      if (avail - shown > 0) rows.push({ kind: "expander", dir: "tail", key: file.path, remaining: avail - shown });
+    } else {
+      // Not loaded yet — offer the expander; it disappears if nothing's there.
+      rows.push({ kind: "expander", dir: "tail", key: file.path, remaining: 0 });
+    }
+  }
+  return rows;
+}
 
 /** Order diff files by the finalizer's reading guide, unguided files last in diff order. */
 function orderFiles(files: DiffFile[], guide: FileGuideEntry[]): DiffFile[] {
@@ -151,6 +216,33 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
   // Where the comment composer is open, if anywhere.
   const [composer, setComposer] = useState<{ file: string; line: number } | null>(null);
   const diffScrollRef = useRef<HTMLDivElement>(null);
+
+  // Context expansion: full file content at the reviewed commit (lazy), plus
+  // how many lines have been revealed above each hunk / after the last one.
+  const [fileContents, setFileContents] = useState<Record<string, string[] | null>>({});
+  const [revealUp, setRevealUp] = useState<Record<string, number>>({});
+  const [revealTail, setRevealTail] = useState<Record<string, number>>({});
+
+  async function ensureFileContent(path: string): Promise<string[] | null> {
+    if (fileContents[path] !== undefined) return fileContents[path];
+    try {
+      const raw = await getFileContent(pr.id, path);
+      const lines = raw.split("\n");
+      if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      setFileContents((m) => ({ ...m, [path]: lines }));
+      return lines;
+    } catch {
+      setFileContents((m) => ({ ...m, [path]: null }));
+      return null;
+    }
+  }
+
+  async function expand(path: string, row: { dir: "up" | "tail"; key: string }) {
+    const lines = await ensureFileContent(path);
+    if (!lines) return; // unavailable — the expanders for this file disappear
+    if (row.dir === "up") setRevealUp((m) => ({ ...m, [row.key]: (m[row.key] ?? 0) + EXPAND_STEP }));
+    else setRevealTail((m) => ({ ...m, [row.key]: (m[row.key] ?? 0) + EXPAND_STEP }));
+  }
 
   useEffect(() => {
     getDiff(pr.id).then(setDiffText).catch((e) => setDiffError(String(e)));
@@ -338,8 +430,29 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                   </div>
                   <table className="difftable">
                     <tbody>
-                      {file.lines.map((l, i) => (
-                        l.kind === "hunk" ? (
+                      {buildDiffRows(file, fileContents[file.path], revealUp, revealTail).map((row, ri) => {
+                        if (row.kind === "expander") {
+                          return (
+                            <tr key={`x-${ri}`} className="dl-expander" onClick={() => expand(file.path, row)}>
+                              <td className="dl-no" colSpan={2}>{row.dir === "up" ? "⇡" : "⇣"}</td>
+                              <td className="dl-text">
+                                ⋯ expand {row.remaining > 0 ? `${Math.min(EXPAND_STEP, row.remaining)} of ${row.remaining} hidden lines` : "lines below"}
+                              </td>
+                            </tr>
+                          );
+                        }
+                        if (row.kind === "expanded") {
+                          return (
+                            <tr key={`e-${row.newNo}`} className="dl-context dl-revealed" title="context at the reviewed commit (not part of the diff — can't take comments)">
+                              <td className="dl-no">{row.oldNo ?? ""}</td>
+                              <td className="dl-no">{row.newNo}</td>
+                              <td className="dl-text"><span className="dl-marker"> </span>{row.text}</td>
+                            </tr>
+                          );
+                        }
+                        const l = row.line;
+                        const i = row.idx;
+                        return l.kind === "hunk" ? (
                           <tr key={i} className="dl-hunk"><td className="dl-no" /><td className="dl-no" /><td className="dl-text">{l.text}</td></tr>
                         ) : (
                           <Fragment key={i}>
@@ -382,8 +495,8 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                               </tr>
                             )}
                           </Fragment>
-                        )
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </section>

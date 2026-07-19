@@ -508,8 +508,9 @@ export function startRun(db: Database.Database, prId: number, stage: string): nu
   const info = db.prepare("INSERT INTO runs (pr_id, stage, status) VALUES (?, ?, 'running')").run(prId, stage);
   return Number(info.lastInsertRowid);
 }
-export function finishRun(db: Database.Database, runId: number, status: string, error?: string): void {
-  db.prepare("UPDATE runs SET status = ?, error = ?, ended_at = datetime('now','subsec') WHERE id = ?").run(status, error ?? null, runId);
+export function finishRun(db: Database.Database, runId: number, status: string, error?: string, artifactPath?: string): void {
+  db.prepare("UPDATE runs SET status = ?, error = ?, artifact_path = ?, ended_at = datetime('now','subsec') WHERE id = ?")
+    .run(status, error ?? null, artifactPath ?? null, runId);
 }
 export function listRuns(db: Database.Database, prId: number): import("../shared/types.ts").RunRecord[] {
   return db.prepare("SELECT * FROM runs WHERE pr_id = ? ORDER BY id ASC").all(prId) as import("../shared/types.ts").RunRecord[];

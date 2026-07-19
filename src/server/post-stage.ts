@@ -13,6 +13,8 @@ export interface PostDeps {
   onUpdate: (pr: PrRecord) => void;
   /** Disclosure line for the posted review; defaults to the built-in marker. */
   marker?: string;
+  /** Opt-in: record accepted/rejected finding decisions for the feedback loop. */
+  feedbackEnabled?: boolean;
 }
 
 export async function runPost(deps: PostDeps, prId: number): Promise<PrRecord> {
@@ -48,7 +50,8 @@ export async function runPost(deps: PostDeps, prId: number): Promise<PrRecord> {
     const done = db.transaction(() => {
       // Post-time selections are the ground truth for the feedback loop:
       // selected → accepted, unselected → rejected (fed back to the finalizer).
-      recordFindingFeedback(db, prId);
+      // Only recorded when the opt-in setting is on.
+      if (deps.feedbackEnabled) recordFindingFeedback(db, prId);
       db.prepare("UPDATE findings SET posted = 1 WHERE pr_id = ? AND selected = 1").run(prId);
       markCommentsPosted(db, prId);
       return updatePr(db, prId, { stage: "posted", status: "done" });

@@ -51,6 +51,15 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
           if (msg.type === "assistant" && msg.message) {
             for (const block of msg.message.content) {
               if (block.type === "text" && block.text) onLog(block.text);
+              // Surface tool activity so long "silent" stretches (the agent
+              // grepping/reading the worktree) still show progress in the log.
+              else if (block.type === "tool_use" && block.name) {
+                let detail = "";
+                try {
+                  detail = JSON.stringify(block.input ?? {}).slice(0, 140);
+                } catch { /* unserializable input — name alone is fine */ }
+                onLog(`\n[tool] ${block.name} ${detail}\n`);
+              }
             }
           } else if (msg.type === "result") {
             if (msg.subtype && msg.subtype !== "success") {

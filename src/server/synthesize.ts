@@ -41,6 +41,8 @@ export interface SynthesizeDeps {
   modelOptions?: EngineModelOptions;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Opt-in: inject past rejected findings for this repo into the finalizer. */
+  feedbackEnabled?: boolean;
 }
 
 export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Finding[]): Promise<PrRecord> {
@@ -69,7 +71,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
     const { system, prompt } = buildFinalizerPrompt(raw, {
       goal: pr.goal ?? undefined,
       goalVerdict: pr.goal_verdict ?? undefined,
-      rejectedExamples: listRejectedExamples(db, pr.owner, pr.repo),
+      ...(deps.feedbackEnabled ? { rejectedExamples: listRejectedExamples(db, pr.owner, pr.repo) } : {}),
     });
     const res = await finalizer.run(
       { system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions, maxTurns: 20, signal: deps.signal, timeoutMs: deps.timeoutMs },

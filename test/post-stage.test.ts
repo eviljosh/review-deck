@@ -72,14 +72,14 @@ test("runPost merges unposted user comments and marks them posted", async () => 
   assert.ok(listComments(db, pr.id).every((c) => c.posted));
 });
 
-test("runPost records accepted/rejected feedback per finding", async () => {
+test("runPost records accepted/rejected feedback per finding when the feedback loop is on", async () => {
   const db = openDb(":memory:");
   const pr = readyPr(db);
   const { setFindingSelected, listRejectedExamples } = await import("../src/server/db.ts");
   const kept = insertFinding(db, pr.id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x.ts", line: 3, side: "RIGHT", what: "real bug", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
   insertFinding(db, pr.id, { engine: "claude", dimension: "maintainability", severity: "optional", file: "x.ts", line: 4, side: "RIGHT", what: "naming nit", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
   setFindingSelected(db, kept.id, true);
-  await runPost({ db, exec: okExec, dataDir: process.env.SCRATCH ?? "/tmp", onUpdate: () => {} }, pr.id);
+  await runPost({ db, exec: okExec, dataDir: process.env.SCRATCH ?? "/tmp", feedbackEnabled: true, onUpdate: () => {} }, pr.id);
 
   const rejected = listRejectedExamples(db, "o", "r");
   assert.equal(rejected.length, 1);

@@ -113,6 +113,7 @@ export interface RunRecord {
   stage: string;
   status: string;
   error: string | null;
+  artifact_path: string | null; // streamed output persisted for debugging
   started_at: string;
   ended_at: string | null;
 }

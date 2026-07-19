@@ -166,6 +166,20 @@ export function Settings({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="section">
+        <h3>Feedback loop</h3>
+        <label className="check-row">
+          <input type="checkbox" checked={settings.feedbackLoop}
+            onChange={(e) => patch({ feedbackLoop: e.target.checked })} />
+          Learn from rejected findings
+        </label>
+        <p className="hint-text">
+          When on: posting records which findings you kept vs. rejected (per repo), and future
+          reviews of that repo tell the finalizer to deprioritize findings similar to past
+          rejections. Off by default — the injected examples steer the model.
+        </p>
+      </div>
+
+      <div className="section">
         <h3>Posted-review marker</h3>
         <p className="hint-text">Disclosure line prepended to every review posted to GitHub.</p>
         <textarea className="marker-textarea" value={settings.robotMarker}

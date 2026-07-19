@@ -1,3 +1,4 @@
+import { readFileSync, existsSync } from "node:fs";
 import Fastify, { type FastifyInstance } from "fastify";
 import pLimit from "p-limit";
 import type Database from "better-sqlite3";
@@ -198,7 +199,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
     try {
-      const pr = await runPost({ db, exec, dataDir, marker: loadReviewConfig(db).robotMarker, onUpdate: (p) => hub.broadcast({ type: "pr_updated", pr: p }) }, id);
+      const cfg = loadReviewConfig(db);
+      const pr = await runPost({ db, exec, dataDir, marker: cfg.robotMarker, feedbackEnabled: cfg.feedbackLoop, onUpdate: (p) => hub.broadcast({ type: "pr_updated", pr: p }) }, id);
       hub.broadcast({ type: "findings_updated", prId: id });
       return { ok: true, stage: pr.stage };
     } catch (err) {
@@ -216,6 +218,53 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
     return listRuns(db, id);
+  });
+
+  // Persisted output of a single run (e.g. a failed deep-review engine task),
+  // for debugging from the runs timeline.
+  app.get<{ Params: { id: string; rid: string } }>("/api/prs/:id/runs/:rid/output", async (req, reply) => {
+    const id = Number(req.params.id), rid = Number(req.params.rid);
+    if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
+    const run = listRuns(db, id).find((r) => r.id === rid);
+    if (!run) return reply.code(404).send({ error: "run not found" });
+    let output: string | null = null;
+    if (run.artifact_path) {
+      try {
+        output = readFileSync(run.artifact_path, "utf8");
+      } catch {
+        // artifact purged/moved — fall through with error text only
+      }
+    }
+    return { stage: run.stage, status: run.status, error: run.error, output };
+  });
+
+  // A file's full content at the reviewed commit (for expanding diff context in
+  // the walkthrough). Served from the repo cache via the pinned SHA so it works
+  // even after the worktree is reclaimed; falls back to the worktree checkout.
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/api/prs/:id/file", async (req, reply) => {
+    const id = Number(req.params.id);
+    const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+    if (!pr) return reply.code(404).send({ error: "pr not found" });
+    const path = String(req.query?.path ?? "");
+    if (!path || path.startsWith("/") || path.split("/").includes("..")) {
+      return reply.code(400).send({ error: "invalid path" });
+    }
+    if (pr.head_sha) {
+      try {
+        const { stdout } = await exec("git", ["-C", cachePath(dataDir, pr.owner, pr.repo), "show", `${pr.head_sha}:${path}`]);
+        return { content: stdout };
+      } catch {
+        // cache missing / path not in that commit — try the worktree below
+      }
+    }
+    if (pr.worktree_path && existsSync(`${pr.worktree_path}/${path}`)) {
+      try {
+        return { content: readFileSync(`${pr.worktree_path}/${path}`, "utf8") };
+      } catch {
+        // unreadable — fall through
+      }
+    }
+    return reply.code(404).send({ error: "file not available at the reviewed commit" });
   });
 
   // The whole review as a self-contained markdown brief — pipe it straight

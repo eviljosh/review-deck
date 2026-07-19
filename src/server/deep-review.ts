@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import pLimit from "p-limit";
 import { z } from "zod";
@@ -80,21 +81,34 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
         // exactly what ran, how long it took, and whether it timed out.
         const rid = startRun(db, prId, `deep_review · ${t.engineName}/${t.dimension}`);
         log(`[${t.engineName}/${t.dimension}] starting…\n`);
+        // Capture this task's streamed output and persist it win or lose, so a
+        // failed/timed-out run can be inspected from the runs timeline.
+        let streamed = "";
+        const taskLog: LogSink = (chunk) => { streamed += chunk; log(chunk); };
+        const logName = `${t.engineName}-${t.dimension}.log.txt`;
+        const saveStream = (): string | undefined => {
+          try {
+            writeArtifacts(dir, { [logName]: streamed });
+            return join(dir, logName);
+          } catch {
+            return undefined;
+          }
+        };
         try {
           const res = await t.engine.run(
             { system: t.system, prompt: t.prompt, workdir, ...engineModelOptions(config, t.engineName), maxTurns: 30, timeoutMs: config.engineTimeoutMs, signal: deps.signal },
-            log,
+            taskLog,
           );
           writeArtifacts(dir, { [`${t.engineName}-${t.dimension}.txt`]: res.text });
           const parsed = parseAgentJson(res.text, rawFindingsSchema);
           if (!parsed.ok) throw new Error(`parse failed (${t.engineName}/${t.dimension}): ${parsed.error}`);
           const found = parsed.value.findings.map((f): Finding => ({ ...f, engine: t.engineName, anchorable: false }));
-          finishRun(db, rid, "done");
+          finishRun(db, rid, "done", undefined, saveStream());
           log(`[${t.engineName}/${t.dimension}] done — ${found.length} finding(s)\n`);
           return found;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          finishRun(db, rid, "failed", message);
+          finishRun(db, rid, "failed", message, saveStream());
           throw err;
         }
       })),
