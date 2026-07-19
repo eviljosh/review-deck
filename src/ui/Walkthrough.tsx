@@ -293,7 +293,6 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
 
   const current = files.find((f) => f.path === currentPath) ?? files[0] ?? null;
   const guideOf = (path: string) => guide.find((g) => g.path === path);
-  const roleOf = (path: string) => guideOf(path)?.role ?? null;
 
   const findingsByFile = useMemo(() => {
     const m = new Map<string, StoredFinding[]>();
@@ -365,7 +364,6 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
           <span className="wt-selcount">{selectedCount} finding{selectedCount === 1 ? "" : "s"} selected</span>
         </div>
         <div className="wt-header-right">
-          {pr.review_verdict && <span className="wt-verdict"><Md inline>{pr.review_verdict}</Md></span>}
           <button className="btn btn-sm" title="Copy the full review as markdown (for a CLI agent session)" onClick={copyReview}>
             {copied ? "Copied ✓" : "⎘ Copy review"}
           </button>
@@ -426,7 +424,6 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                   <div className="wt-diff-filehead">
                     {file.status !== "modified" && <span className={`badge wt-status-${file.status}`}>{file.status}</span>}
                     <span className="wt-diff-path">{file.path}</span>
-                    {roleOf(file.path) && <span className="wt-filehead-role" title={roleOf(file.path)!}>{roleOf(file.path)}</span>}
                   </div>
                   <table className="difftable">
                     <tbody>
@@ -508,18 +505,12 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
             {current && guideOf(current.path) && (
               <div className="wt-section">
                 <h4>This file</h4>
-                <Md>{guideOf(current.path)!.walkthrough?.trim() || guideOf(current.path)!.role}</Md>
-              </div>
-            )}
-            {pr.goal && (
-              <div className="wt-section">
-                <details className="fold fold-cta">
-                  <summary>
-                    <span className="fold-title">PR goal</span>
-                    <span className="fold-hint">click to view</span>
-                  </summary>
-                  <div className="fold-body"><Md>{pr.goal}</Md></div>
-                </details>
+                {guideOf(current.path)!.role && (
+                  <div className="wt-file-role"><Md>{guideOf(current.path)!.role}</Md></div>
+                )}
+                {guideOf(current.path)!.walkthrough?.trim() && (
+                  <Md>{guideOf(current.path)!.walkthrough!}</Md>
+                )}
               </div>
             )}
             <div className="wt-section">
