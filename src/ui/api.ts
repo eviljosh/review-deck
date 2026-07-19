@@ -1,4 +1,4 @@
-import type { ChatMessage, PrRecord, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import type { ChatMessage, PrRecord, ReviewEvent, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
 
 export interface DimensionDef { key: string; guidance: string }
 export interface RiskFlagDef { key: string; description: string }
@@ -120,8 +120,10 @@ export async function updateFinding(
   if (!res.ok) throw new Error(`finding update failed: ${res.status}`);
   return res.json();
 }
-export async function postReview(id: number): Promise<{ ok: boolean; stage?: string; error?: string }> {
-  const res = await fetch(`/api/prs/${id}/post`, { method: "POST" });
+export async function postReview(id: number, event: ReviewEvent = "COMMENT"): Promise<{ ok: boolean; stage?: string; error?: string }> {
+  const res = await fetch(`/api/prs/${id}/post`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event }),
+  });
   return res.json();
 }
 export async function getRuns(id: number): Promise<RunRecord[]> {

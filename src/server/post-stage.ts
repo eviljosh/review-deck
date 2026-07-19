@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Exec } from "./exec.ts";
-import type { PrRecord } from "../shared/types.ts";
+import type { PrRecord, ReviewEvent } from "../shared/types.ts";
 import { getPr, updatePr, listFindings, listComments, markCommentsPosted, recordFindingFeedback, getSetting, DEFAULT_PREFACE_KEY } from "./db.ts";
 import { postPrReview } from "./gh.ts";
 import { buildReviewPayload } from "./post-review.ts";
@@ -17,7 +17,7 @@ export interface PostDeps {
   feedbackEnabled?: boolean;
 }
 
-export async function runPost(deps: PostDeps, prId: number): Promise<PrRecord> {
+export async function runPost(deps: PostDeps, prId: number, event: ReviewEvent = "COMMENT"): Promise<PrRecord> {
   const { db, exec, dataDir, onUpdate } = deps;
   const pr = getPr(db, prId);
   if (!pr) throw new Error(`pr ${prId} not found`);
@@ -34,7 +34,9 @@ export async function runPost(deps: PostDeps, prId: number): Promise<PrRecord> {
     const preface = pr.preface ?? getSetting(db, DEFAULT_PREFACE_KEY) ?? "";
     const findings = listFindings(db, prId);
     const userComments = listComments(db, prId).filter((c) => !c.posted);
-    if (!findings.some((f) => f.selected) && userComments.length === 0 && !preface.trim()) {
+    // A bare approval ("LGTM") is legitimate with nothing attached; anything
+    // else with no content would post an empty review.
+    if (event !== "APPROVE" && !findings.some((f) => f.selected) && userComments.length === 0 && !preface.trim()) {
       throw new Error("nothing to post — select a finding, add a comment, or write a preface");
     }
     const { body, comments } = buildReviewPayload(preface, findings, deps.marker, userComments);
@@ -42,7 +44,7 @@ export async function runPost(deps: PostDeps, prId: number): Promise<PrRecord> {
     // inline comments land on the right lines even if the author has pushed.
     await postPrReview(
       exec, pr.owner, pr.repo, pr.number,
-      { body, event: "COMMENT", comments, ...(pr.head_sha ? { commit_id: pr.head_sha } : {}) },
+      { body, event, comments, ...(pr.head_sha ? { commit_id: pr.head_sha } : {}) },
       stageArtifactDir(dataDir, prId, "post"),
     );
     // Atomically mark posted + advance stage, immediately after the POST, so a

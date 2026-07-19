@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { openDb, insertPr, updatePr, insertFinding, listFindings, setSetting, getPr, DEFAULT_PREFACE_KEY } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import { runPost } from "../src/server/post-stage.ts";
@@ -85,6 +86,42 @@ test("runPost records accepted/rejected feedback per finding when the feedback l
   assert.equal(rejected.length, 1);
   assert.match(rejected[0], /naming nit/);
   assert.match(rejected[0], /optional\/maintainability/);
+});
+
+function payloadCapture(): { exec: Exec; read: () => any } {
+  let inputFile = "";
+  const exec: Exec = async (cmd, args) => {
+    const i = args.indexOf("--input");
+    if (i >= 0) inputFile = args[i + 1];
+    return { stdout: "{}", stderr: "" };
+  };
+  return { exec, read: () => JSON.parse(readFileSync(inputFile, "utf8")) };
+}
+
+test("runPost defaults to a COMMENT review", async () => {
+  const db = openDb(":memory:");
+  const pr = readyPr(db);
+  const cap = payloadCapture();
+  await runPost({ db, exec: cap.exec, dataDir: process.env.SCRATCH ?? "/tmp", onUpdate: () => {} }, pr.id);
+  assert.equal(cap.read().event, "COMMENT");
+});
+
+test("runPost passes an explicit APPROVE / REQUEST_CHANGES event through to GitHub", async () => {
+  const db = openDb(":memory:");
+  const pr = readyPr(db);
+  const cap = payloadCapture();
+  await runPost({ db, exec: cap.exec, dataDir: process.env.SCRATCH ?? "/tmp", onUpdate: () => {} }, pr.id, "REQUEST_CHANGES");
+  assert.equal(cap.read().event, "REQUEST_CHANGES");
+});
+
+test("a bare APPROVE with no findings, comments, or preface is allowed", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/6", owner: "o", repo: "r", number: 6 });
+  updatePr(db, pr.id, { stage: "ready", status: "done", preface: "" });
+  const cap = payloadCapture();
+  const result = await runPost({ db, exec: cap.exec, dataDir: process.env.SCRATCH ?? "/tmp", onUpdate: () => {} }, pr.id, "APPROVE");
+  assert.equal(result.stage, "posted");
+  assert.equal(cap.read().event, "APPROVE");
 });
 
 test("concurrent runPost posts exactly once (atomic claim)", async () => {

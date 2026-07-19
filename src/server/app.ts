@@ -7,7 +7,7 @@ import type { WsHub } from "./ws.ts";
 import type { LlmEngine } from "./engines/types.ts";
 import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { runChatTurn } from "./chat.ts";
-import { createPrBodySchema, type PrRecord, type Stage } from "../shared/types.ts";
+import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
 import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, listChatMessages, clearChatMessages } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
@@ -198,12 +198,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { deleted: stale.length, olderThanDays: ARCHIVE_PURGE_DAYS };
   });
 
-  app.post<{ Params: { id: string } }>("/api/prs/:id/post", async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { event?: string } | null }>("/api/prs/:id/post", async (req, reply) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
+    const event = (req.body?.event ?? "COMMENT") as ReviewEvent;
+    if (!["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(event)) {
+      return reply.code(400).send({ error: `invalid review event: ${event}` });
+    }
     try {
       const cfg = loadReviewConfig(db);
-      const pr = await runPost({ db, exec, dataDir, marker: cfg.robotMarker, feedbackEnabled: cfg.feedbackLoop, onUpdate: (p) => hub.broadcast({ type: "pr_updated", pr: p }) }, id);
+      const pr = await runPost({ db, exec, dataDir, marker: cfg.robotMarker, feedbackEnabled: cfg.feedbackLoop, onUpdate: (p) => hub.broadcast({ type: "pr_updated", pr: p }) }, id, event);
       hub.broadcast({ type: "findings_updated", prId: id });
       return { ok: true, stage: pr.stage };
     } catch (err) {

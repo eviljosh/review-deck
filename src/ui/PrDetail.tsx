@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FindingTheme, PrRecord, RunRecord, StoredFinding } from "../shared/types.ts";
+import type { FindingTheme, PrRecord, ReviewEvent, RunRecord, StoredFinding } from "../shared/types.ts";
 import {
   archivePr,
   cancelPr,
@@ -257,9 +257,20 @@ export function PrDetail({
     else getDefaultPreface().then((d) => setPreface((cur) => cur || d));
   }, [pr.id, pr.preface]);
 
+  function postLabel(event: ReviewEvent, nFindings: number, nComments: number): string {
+    const content =
+      nFindings === 0 && nComments === 0
+        ? ""
+        : ` ${nFindings} finding${nFindings === 1 ? "" : "s"}${nComments > 0 ? ` + ${nComments} comment${nComments === 1 ? "" : "s"}` : ""}`;
+    if (event === "APPROVE") return content ? `Approve +${content}` : "Approve PR";
+    if (event === "REQUEST_CHANGES") return content ? `Request changes +${content}` : "Request changes";
+    return `Post${content} to GitHub`;
+  }
+
   const posted = pr.stage === "posted";
   const showGate = pr.stage === "ready" || posted;
   const [posting, setPosting] = useState(false);
+  const [postEvent, setPostEvent] = useState<ReviewEvent>("COMMENT");
   const selectedCount = findings.filter((f) => f.selected).length;
 
   const themes = parseThemes(pr.finding_themes);
@@ -513,11 +524,22 @@ export function PrDetail({
         )}
 
         {showGate && (
-          <div className="section">
+          <div className="section post-gate">
+            <select
+              className="post-event-select"
+              value={postEvent}
+              disabled={posted || posting}
+              title="How the review lands on GitHub — comment only (default), approve, or request changes"
+              onChange={(e) => setPostEvent(e.target.value as ReviewEvent)}
+            >
+              <option value="COMMENT">Comment only</option>
+              <option value="APPROVE">Approve ✓</option>
+              <option value="REQUEST_CHANGES">Request changes ✗</option>
+            </select>
             <button
               className="btn btn-primary"
-              disabled={posted || posting || (selectedCount === 0 && commentCount === 0 && !preface.trim())}
-              title={selectedCount === 0 && commentCount === 0 && !preface.trim() ? "Select a finding, add a comment, or write a preface" : undefined}
+              disabled={posted || posting || (postEvent !== "APPROVE" && selectedCount === 0 && commentCount === 0 && !preface.trim())}
+              title={selectedCount === 0 && commentCount === 0 && !preface.trim() && postEvent !== "APPROVE" ? "Select a finding, add a comment, or write a preface" : undefined}
               onClick={async () => {
                 setPosting(true);
                 try {
@@ -537,7 +559,7 @@ export function PrDetail({
                       if (!ok) return;
                     }
                   }
-                  const r = await postReview(pr.id);
+                  const r = await postReview(pr.id, postEvent);
                   if (!r.ok) alert(r.error);
                 } finally {
                   setPosting(false);
@@ -548,7 +570,7 @@ export function PrDetail({
                 ? "Posted ✓"
                 : posting
                   ? "Posting…"
-                  : `Post ${selectedCount} finding${selectedCount === 1 ? "" : "s"}${commentCount > 0 ? ` + ${commentCount} comment${commentCount === 1 ? "" : "s"}` : ""} to GitHub`}
+                  : postLabel(postEvent, selectedCount, commentCount)}
             </button>
           </div>
         )}

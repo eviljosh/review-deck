@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Exec } from "./exec.ts";
+import type { ReviewEvent } from "../shared/types.ts";
 import { isBotAuthored } from "./post-review.ts";
 
 export type PrMeta = {
@@ -184,7 +185,7 @@ export async function postPrReview(
   owner: string,
   repo: string,
   number: number,
-  payload: { body: string; event: "COMMENT"; comments: { path: string; line: number; side: string; body: string }[]; commit_id?: string },
+  payload: { body: string; event: ReviewEvent; comments: { path: string; line: number; side: string; body: string }[]; commit_id?: string },
   tmpDir: string,
 ): Promise<void> {
   mkdirSync(tmpDir, { recursive: true });

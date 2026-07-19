@@ -620,6 +620,28 @@ test("POST /api/prs/:id/post 500s when nothing is selected and no preface is set
   assert.match(res.json().error, /nothing to post/);
 });
 
+test("POST /api/prs/:id/post 400s on an unknown review event", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { stage: "ready", status: "done" });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/post`, payload: { event: "MERGE" } });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json().error, /invalid review event/);
+});
+
+test("POST /api/prs/:id/post accepts event=APPROVE with nothing selected", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { stage: "ready", status: "done" });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/post`, payload: { event: "APPROVE" } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().stage, "posted");
+});
+
 test("POST /api/prs/:id/post 404s for a missing pr", async () => {
   const app = buildApp(deps());
   const res = await app.inject({ method: "POST", url: "/api/prs/9999/post" });

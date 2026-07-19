@@ -53,6 +53,9 @@ export interface FileGuideEntry {
 }
 
 /** A reviewer-authored comment anchored to a diff line, merged into the posted review. */
+/** GitHub review verdict. COMMENT is the default; the others gate the merge. */
+export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+
 export interface UserComment {
   id: number;
   pr_id: number;

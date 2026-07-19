@@ -387,6 +387,16 @@ a:hover { text-decoration: underline; }
 .detail-body { padding: 16px 18px; }
 
 .section { margin-bottom: 20px; }
+.post-gate { display: flex; align-items: center; gap: 8px; }
+.post-event-select {
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
 .section:last-child { margin-bottom: 0; }
 .section h3 {
   font-size: 12px;
