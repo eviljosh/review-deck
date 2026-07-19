@@ -20,6 +20,7 @@ import {
 import { DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill } from "./bits.tsx";
 import { Walkthrough } from "./Walkthrough.tsx";
 import { ChatPane } from "./ChatPane.tsx";
+import { buildReviewMarkdown } from "./reviewMarkdown.ts";
 import type { ChatStream } from "./useLivePrs.ts";
 
 function parseList(json: string | null): string[] {
@@ -198,6 +199,20 @@ export function PrDetail({
     if (!walkthrough) getFindings(pr.id).then(setFindings).catch(() => {});
   }, [walkthrough, pr.id]);
 
+  // Copy the whole review as a markdown brief — for pasting into a CLI agent
+  // session (Claude Code / Codex / …) to continue with fixes or experiments.
+  const [copied, setCopied] = useState(false);
+  async function copyReview() {
+    try {
+      const cs = await listComments(pr.id).catch(() => []);
+      await navigator.clipboard.writeText(buildReviewMarkdown(pr, findings, cs));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      alert(`copy failed: ${String(e)}`);
+    }
+  }
+
   const [runs, setRuns] = useState<RunRecord[]>([]);
   useEffect(() => {
     getRuns(pr.id).then(setRuns).catch(() => {});
@@ -256,6 +271,11 @@ export function PrDetail({
           {(pr.stage === "ready" || posted || findings.length > 0) && (
             <button className="btn btn-sm btn-primary" onClick={() => setWalkthrough(true)}>
               ⧉ Walkthrough
+            </button>
+          )}
+          {(pr.summary || findings.length > 0) && (
+            <button className="btn btn-sm" title="Copy the full review as markdown (for a CLI agent session)" onClick={copyReview}>
+              {copied ? "Copied ✓" : "⎘ Copy review"}
             </button>
           )}
           {pr.status === "running" ? (

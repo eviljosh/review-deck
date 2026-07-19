@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
 import { addComment, getDiff, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile } from "./diffParse.ts";
+import { buildReviewMarkdown } from "./reviewMarkdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
 import type { ChatStream } from "./useLivePrs.ts";
@@ -251,6 +252,17 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
 
   const selectedCount = findings.filter((f) => f.selected).length;
 
+  const [copied, setCopied] = useState(false);
+  async function copyReview() {
+    try {
+      await navigator.clipboard.writeText(buildReviewMarkdown(pr, findings, comments));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      alert(`copy failed: ${String(e)}`);
+    }
+  }
+
   return (
     <div className="walkthrough-overlay">
       <div className="wt-header">
@@ -261,6 +273,9 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
         </div>
         <div className="wt-header-right">
           {pr.review_verdict && <span className="wt-verdict"><Md inline>{pr.review_verdict}</Md></span>}
+          <button className="btn btn-sm" title="Copy the full review as markdown (for a CLI agent session)" onClick={copyReview}>
+            {copied ? "Copied ✓" : "⎘ Copy review"}
+          </button>
           <button className="btn btn-sm btn-ghost" onClick={onClose}>✕ Close (esc)</button>
         </div>
       </div>
