@@ -112,7 +112,7 @@ export async function setAllFindingsSelected(prId: number, selected: boolean): P
 export async function updateFinding(
   prId: number,
   fid: number,
-  patch: { what?: string; why?: string; suggestedFix?: string },
+  patch: { what?: string; why?: string; suggestedFix?: string; reviewerNote?: string | null },
 ): Promise<StoredFinding> {
   const res = await fetch(`/api/prs/${prId}/findings/${fid}`, {
     method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch),
@@ -171,6 +171,13 @@ export async function addComment(
 export async function removeComment(id: number, cid: number): Promise<void> {
   const res = await fetch(`/api/prs/${id}/comments/${cid}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`delete comment failed: ${res.status}`);
+}
+export async function updateComment(id: number, cid: number, body: string): Promise<UserComment> {
+  const res = await fetch(`/api/prs/${id}/comments/${cid}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ body }),
+  });
+  if (!res.ok) throw new Error(`comment update failed: ${res.status}`);
+  return res.json();
 }
 
 export async function getChatHistory(id: number): Promise<ChatMessage[]> {

@@ -147,7 +147,7 @@ export function migrate(db: Database.Database): void {
   const findingCols = new Set(
     (db.prepare("PRAGMA table_info(findings)").all() as { name: string }[]).map((c) => c.name),
   );
-  for (const [name, type] of [["engine", "TEXT"], ["agreement", "INTEGER DEFAULT 0"], ["theme", "TEXT"], ["impact", "TEXT"]] as [string, string][]) {
+  for (const [name, type] of [["engine", "TEXT"], ["agreement", "INTEGER DEFAULT 0"], ["theme", "TEXT"], ["impact", "TEXT"], ["reviewer_note", "TEXT"]] as [string, string][]) {
     if (!findingCols.has(name)) db.exec(`ALTER TABLE findings ADD COLUMN ${name} ${type}`);
   }
 }
@@ -324,15 +324,16 @@ const IMPACT_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 export function insertFinding(
   db: Database.Database,
   prId: number,
-  f: import("../shared/types.ts").Finding & { agreement: boolean; selected?: boolean },
+  f: import("../shared/types.ts").Finding & { agreement: boolean; selected?: boolean; reviewerNote?: string | null },
 ): import("../shared/types.ts").StoredFinding {
   const info = db.prepare(
-    `INSERT INTO findings (pr_id, engine, dimension, severity, file, line, side, what, why, suggested_fix, theme, impact, anchorable, agreement, selected)
-     VALUES (@pr_id,@engine,@dimension,@severity,@file,@line,@side,@what,@why,@suggested_fix,@theme,@impact,@anchorable,@agreement,@selected)`,
+    `INSERT INTO findings (pr_id, engine, dimension, severity, file, line, side, what, why, suggested_fix, theme, impact, reviewer_note, anchorable, agreement, selected)
+     VALUES (@pr_id,@engine,@dimension,@severity,@file,@line,@side,@what,@why,@suggested_fix,@theme,@impact,@reviewer_note,@anchorable,@agreement,@selected)`,
   ).run({
     pr_id: prId, engine: f.engine, dimension: f.dimension, severity: f.severity,
     file: f.file, line: f.line, side: f.side, what: f.what, why: f.why,
     suggested_fix: f.suggestedFix, theme: f.theme ?? null, impact: f.impact ?? null,
+    reviewer_note: f.reviewerNote ?? null,
     anchorable: f.anchorable ? 1 : 0, agreement: f.agreement ? 1 : 0,
     selected: f.selected ? 1 : 0,
   });
@@ -347,6 +348,7 @@ function rowToFinding(r: Record<string, unknown>): import("../shared/types.ts").
     what: r.what as string, why: r.why as string, suggestedFix: (r.suggested_fix as string) ?? "",
     theme: (r.theme as string) ?? null,
     impact: (r.impact as never) ?? null,
+    reviewerNote: (r.reviewer_note as string) ?? null,
     anchorable: !!r.anchorable, agreement: !!r.agreement, selected: !!r.selected, posted: !!r.posted,
   };
 }
@@ -395,17 +397,18 @@ export function setAllFindingsSelected(db: Database.Database, prId: number, sele
   db.prepare("UPDATE findings SET selected = ? WHERE pr_id = ? AND posted = 0").run(selected ? 1 : 0, prId);
 }
 
-/** Edit a finding's text before posting (what / why / suggested fix). */
+/** Edit a finding's text before posting (what / why / suggested fix / your note). */
 export function updateFindingText(
   db: Database.Database,
   findingId: number,
-  patch: { what?: string; why?: string; suggestedFix?: string },
+  patch: { what?: string; why?: string; suggestedFix?: string; reviewerNote?: string | null },
 ): import("../shared/types.ts").StoredFinding {
   const sets: string[] = [];
   const params: Record<string, unknown> = { id: findingId };
   if (patch.what !== undefined) { sets.push("what = @what"); params.what = patch.what; }
   if (patch.why !== undefined) { sets.push("why = @why"); params.why = patch.why; }
   if (patch.suggestedFix !== undefined) { sets.push("suggested_fix = @fix"); params.fix = patch.suggestedFix; }
+  if (patch.reviewerNote !== undefined) { sets.push("reviewer_note = @note"); params.note = patch.reviewerNote?.trim() ? patch.reviewerNote : null; }
   if (sets.length > 0) {
     const info = db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = @id AND posted = 0`).run(params);
     if (info.changes === 0) throw new Error(`finding ${findingId} not found (or already posted)`);
@@ -498,6 +501,13 @@ export function listComments(db: Database.Database, prId: number): import("../sh
 export function deleteComment(db: Database.Database, prId: number, commentId: number): void {
   const info = db.prepare("DELETE FROM comments WHERE id = ? AND pr_id = ? AND posted = 0").run(commentId, prId);
   if (info.changes === 0) throw new Error(`comment ${commentId} not found (or already posted)`);
+}
+
+export function updateCommentBody(db: Database.Database, prId: number, commentId: number, body: string): import("../shared/types.ts").UserComment {
+  const info = db.prepare("UPDATE comments SET body = ? WHERE id = ? AND pr_id = ? AND posted = 0").run(body, commentId, prId);
+  if (info.changes === 0) throw new Error(`comment ${commentId} not found (or already posted)`);
+  const row = db.prepare("SELECT * FROM comments WHERE id = ?").get(commentId) as Record<string, unknown>;
+  return rowToComment(row);
 }
 
 export function markCommentsPosted(db: Database.Database, prId: number): void {

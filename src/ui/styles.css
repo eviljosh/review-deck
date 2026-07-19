@@ -829,6 +829,16 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-selcount { margin-left: 12px; color: var(--text-muted); font-size: 12px; }
 
 .wt-finding-off { opacity: 0.55; }
+.wt-reviewer-note {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.wt-note-tag { color: var(--accent); font-size: 11px; font-weight: 600; }
+.wt-note-hint { font-weight: 400; color: var(--text-muted); }
+.wt-comment-actions { display: flex; gap: 2px; margin-left: auto; }
 .wt-edit-btn { margin-left: auto; }
 .wt-finding-editor { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .wt-finding-editor label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }

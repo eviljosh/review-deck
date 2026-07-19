@@ -126,6 +126,11 @@ function Finding({
           {f.agreement && <span title="both engines flagged this">🤝</span>}
           <span className="f-engine">{f.engine}</span>
         </div>
+        {f.reviewerNote && (
+          <div className="wt-reviewer-note">
+            <span className="wt-note-tag">👤 you</span> <Md inline>{f.reviewerNote}</Md>
+          </div>
+        )}
         <div className="f-what"><Md inline>{f.what}</Md></div>
         {f.why && <div className="f-why"><Md inline>{f.why}</Md></div>}
         {f.suggestedFix && <div className="f-fix">Fix: <Md inline>{f.suggestedFix}</Md></div>}

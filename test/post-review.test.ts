@@ -6,8 +6,22 @@ import type { StoredFinding } from "../src/shared/types.ts";
 function f(over: Partial<StoredFinding>): StoredFinding {
   return { id: 1, pr_id: 1, engine: "claude", dimension: "correctness", severity: "serious",
     file: "x.ts", line: 3, side: "RIGHT", what: "w", why: "y", suggestedFix: "fix it",
-    anchorable: true, agreement: false, selected: true, posted: false, ...over };
+    anchorable: true, agreement: false, selected: true, posted: false, reviewerNote: null, ...over };
 }
+
+test("a reviewer note leads the comment, above an AI disclaimer", () => {
+  const p = buildReviewPayload("", [f({ reviewerNote: "This bit us in prod last quarter — please fix before merge." })]);
+  const body = p.comments[0].body;
+  const noteIdx = body.indexOf("bit us in prod");
+  const disclaimerIdx = body.indexOf("AI-generated below this line");
+  const whatIdx = body.indexOf("**[serious]**");
+  assert.ok(noteIdx >= 0 && disclaimerIdx > noteIdx && whatIdx > disclaimerIdx, body);
+});
+
+test("findings without a reviewer note carry no disclaimer line", () => {
+  const p = buildReviewPayload("", [f({})]);
+  assert.doesNotMatch(p.comments[0].body, /AI-generated below this line/);
+});
 
 test("anchorable selected findings become inline comments", () => {
   const p = buildReviewPayload("Take a look:", [f({ id: 1, line: 3, anchorable: true })]);

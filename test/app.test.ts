@@ -180,6 +180,37 @@ test("POST /api/prs/:id/findings/select-all flips every unposted finding", async
   assert.ok(listFindings(d.db, id).every((f) => !f.selected));
 });
 
+test("PATCH /api/prs/:id/comments/:cid edits an unposted comment; posted ones 404", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const add = await app.inject({ method: "POST", url: `/api/prs/${id}/comments`, payload: { file: "x.ts", line: 3, body: "first draft" } });
+  const cid = add.json().id;
+
+  const patch = await app.inject({ method: "PATCH", url: `/api/prs/${id}/comments/${cid}`, payload: { body: "polished version" } });
+  assert.equal(patch.statusCode, 200);
+  assert.equal(patch.json().body, "polished version");
+
+  d.db.prepare("UPDATE comments SET posted = 1 WHERE id = ?").run(cid);
+  const locked = await app.inject({ method: "PATCH", url: `/api/prs/${id}/comments/${cid}`, payload: { body: "nope" } });
+  assert.equal(locked.statusCode, 404);
+});
+
+test("PATCH /api/prs/:id/findings/:fid stores and clears the reviewer note", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const f = insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
+
+  const set = await app.inject({ method: "PATCH", url: `/api/prs/${id}/findings/${f.id}`, payload: { reviewerNote: "my framing" } });
+  assert.equal(set.json().reviewerNote, "my framing");
+
+  const clear = await app.inject({ method: "PATCH", url: `/api/prs/${id}/findings/${f.id}`, payload: { reviewerNote: "   " } });
+  assert.equal(clear.json().reviewerNote, null); // blank clears it
+});
+
 test("PATCH /api/prs/:id/findings/:fid edits text until posted, then 409s", async () => {
   const d = deps();
   const app = buildApp(d);

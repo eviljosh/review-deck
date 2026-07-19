@@ -30,8 +30,15 @@ function findingHeader(f: StoredFinding): string {
 // Render a finding as several markdown paragraphs (header · what · why · fix)
 // separated by blank lines, so GitHub shows readable, logically-broken-up text
 // instead of one dense run-on line. what/why/fix are already markdown.
+// A reviewer note, when present, leads in the reviewer's own voice with a
+// disclaimer separating it from the AI-generated remainder.
 function renderFinding(f: StoredFinding): string {
-  const parts = [findingHeader(f)];
+  const parts: string[] = [];
+  if (f.reviewerNote?.trim()) {
+    parts.push(f.reviewerNote.trim());
+    parts.push("🤖 _AI-generated below this line:_");
+  }
+  parts.push(findingHeader(f));
   if (f.what?.trim()) parts.push(f.what.trim());
   if (f.why?.trim()) parts.push(f.why.trim());
   if (f.suggestedFix?.trim()) parts.push(`**Suggested fix:** ${f.suggestedFix.trim()}`);

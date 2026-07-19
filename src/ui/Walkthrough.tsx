@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type TextareaHTMLAttributes } from "react";
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
-import { addComment, getDiff, getFileContent, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
+import { addComment, getDiff, getFileContent, getFindings, listComments, removeComment, setFindingSelected, updateComment, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
@@ -20,6 +20,19 @@ function parseGuide(json: string | null): FileGuideEntry[] {
 const SEV_DOT: Record<string, string> = { blocking: "●", serious: "●", moderate: "○", optional: "○" };
 
 const EXPAND_STEP = 20;
+
+/** Textarea that grows to fit its content (used by the finding/comment editors). */
+function AutoTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + 2}px`;
+    }
+  }, [props.value]);
+  return <textarea ref={ref} {...props} />;
+}
 
 // Display rows for one file's diff: the parsed diff lines, plus GitHub-style
 // expanders for the context gaps between/around hunks and the lines revealed
@@ -100,15 +113,17 @@ function FindingCard({
   f: StoredFinding;
   posted: boolean;
   onToggle: (f: StoredFinding, checked: boolean) => void;
-  onSave: (fid: number, patch: { what: string; why: string; suggestedFix: string }) => Promise<void>;
+  onSave: (fid: number, patch: { what: string; why: string; suggestedFix: string; reviewerNote: string | null }) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [note, setNote] = useState(f.reviewerNote ?? "");
   const [what, setWhat] = useState(f.what);
   const [why, setWhy] = useState(f.why);
   const [fix, setFix] = useState(f.suggestedFix);
   const [saving, setSaving] = useState(false);
 
   function startEdit() {
+    setNote(f.reviewerNote ?? "");
     setWhat(f.what);
     setWhy(f.why);
     setFix(f.suggestedFix);
@@ -118,7 +133,7 @@ function FindingCard({
   async function save() {
     setSaving(true);
     try {
-      await onSave(f.id, { what, why, suggestedFix: fix });
+      await onSave(f.id, { what, why, suggestedFix: fix, reviewerNote: note.trim() ? note : null });
       setEditing(false);
     } catch (e) {
       alert(String(e));
@@ -148,14 +163,17 @@ function FindingCard({
       </div>
       {editing ? (
         <div className="wt-finding-editor">
+          <label>Your note <span className="wt-note-hint">(posted first, in your voice, above a 🤖 disclaimer — optional)</span>
+            <AutoTextarea value={note} placeholder="e.g. This one matters — it bit us in prod last quarter." onChange={(e) => setNote(e.target.value)} />
+          </label>
           <label>What
-            <textarea value={what} onChange={(e) => setWhat(e.target.value)} />
+            <AutoTextarea value={what} onChange={(e) => setWhat(e.target.value)} />
           </label>
           <label>Why
-            <textarea value={why} onChange={(e) => setWhy(e.target.value)} />
+            <AutoTextarea value={why} onChange={(e) => setWhy(e.target.value)} />
           </label>
           <label>Suggested fix
-            <textarea value={fix} onChange={(e) => setFix(e.target.value)} />
+            <AutoTextarea value={fix} onChange={(e) => setFix(e.target.value)} />
           </label>
           <div className="wt-composer-actions">
             <button className="btn btn-sm btn-primary" disabled={saving || !what.trim()} onClick={save}>
@@ -166,6 +184,11 @@ function FindingCard({
         </div>
       ) : (
         <>
+          {f.reviewerNote && (
+            <div className="wt-reviewer-note">
+              <span className="wt-note-tag">👤 you</span> <Md inline>{f.reviewerNote}</Md>
+            </div>
+          )}
           <div className="f-what"><Md inline>{f.what}</Md></div>
           {f.why && <div className="f-why"><Md inline>{f.why}</Md></div>}
           {f.suggestedFix && <div className="f-fix">Fix: <Md inline>{f.suggestedFix}</Md></div>}
@@ -311,10 +334,23 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
     setFindingSelected(pr.id, f.id, checked).catch(() => {});
     setFindings((fs) => fs.map((x) => (x.id === f.id ? { ...x, selected: checked } : x)));
   };
-  const saveFinding = async (fid: number, patch: { what: string; why: string; suggestedFix: string }) => {
+  const saveFinding = async (fid: number, patch: { what: string; why: string; suggestedFix: string; reviewerNote: string | null }) => {
     const saved = await updateFinding(pr.id, fid, patch);
     setFindings((fs) => fs.map((x) => (x.id === fid ? saved : x)));
   };
+
+  // In-place editing of your own (unposted) comments.
+  const [editingComment, setEditingComment] = useState<{ id: number; body: string } | null>(null);
+  async function saveComment() {
+    if (!editingComment) return;
+    try {
+      const saved = await updateComment(pr.id, editingComment.id, editingComment.body.trim());
+      setComments((cs) => cs.map((c) => (c.id === saved.id ? saved : c)));
+      setEditingComment(null);
+    } catch (e) {
+      alert(String(e));
+    }
+  }
 
   function scrollToFile(path: string) {
     setCurrentPath(path);
@@ -474,13 +510,35 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                             {l.newNo !== null && fComments.filter((c) => c.line === l.newNo).map((c) => (
                               <tr key={`c-${c.id}`} className="dl-widget">
                                 <td colSpan={3}>
-                                  <div className="wt-comment">
-                                    <span className="wt-comment-tag">💬 you{c.posted ? " · posted" : ""}</span>
-                                    <Md inline>{c.body}</Md>
-                                    {!c.posted && (
-                                      <button className="btn btn-sm btn-ghost" onClick={() => dropComment(c.id)}>✕</button>
-                                    )}
-                                  </div>
+                                  {editingComment?.id === c.id ? (
+                                    <div className="wt-composer">
+                                      <AutoTextarea
+                                        autoFocus
+                                        value={editingComment.body}
+                                        onChange={(e) => setEditingComment({ id: c.id, body: e.target.value })}
+                                        onKeyDown={(e) => {
+                                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && editingComment.body.trim()) saveComment();
+                                          if (e.key === "Escape") { e.stopPropagation(); setEditingComment(null); }
+                                        }}
+                                      />
+                                      <div className="wt-composer-actions">
+                                        <button className="btn btn-sm btn-primary" disabled={!editingComment.body.trim()} onClick={saveComment}>Save</button>
+                                        <button className="btn btn-sm btn-ghost" onClick={() => setEditingComment(null)}>Cancel</button>
+                                        <span className="hint">⌘↵</span>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="wt-comment">
+                                      <span className="wt-comment-tag">💬 you{c.posted ? " · posted" : ""}</span>
+                                      <Md inline>{c.body}</Md>
+                                      {!c.posted && (
+                                        <span className="wt-comment-actions">
+                                          <button className="btn btn-sm btn-ghost" title="Edit comment" onClick={() => setEditingComment({ id: c.id, body: c.body })}>✎</button>
+                                          <button className="btn btn-sm btn-ghost" title="Delete comment" onClick={() => dropComment(c.id)}>✕</button>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             ))}

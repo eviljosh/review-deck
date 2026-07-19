@@ -196,6 +196,8 @@ export interface StoredFinding extends Finding {
   agreement: boolean;
   selected: boolean;
   posted: boolean;
+  /** The reviewer's own words, posted above the finding with an AI disclaimer between. */
+  reviewerNote: string | null;
 }
 
 export const findingSchema = z.object({

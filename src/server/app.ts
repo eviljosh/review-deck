@@ -8,7 +8,7 @@ import type { LlmEngine } from "./engines/types.ts";
 import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type Stage } from "../shared/types.ts";
-import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, listChatMessages, clearChatMessages } from "./db.ts";
+import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, listChatMessages, clearChatMessages } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -309,6 +309,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const line = b.line === null || b.line === undefined ? null : Number(b.line);
       return insertComment(db, id, { file: b.file, line: Number.isInteger(line as number) ? line : null, side: b.side === "LEFT" ? "LEFT" : "RIGHT", body: b.body.trim() });
     });
+  app.patch<{ Params: { id: string; cid: string }; Body: { body?: string } }>(
+    "/api/prs/:id/comments/:cid", async (req, reply) => {
+      const id = Number(req.params.id), cid = Number(req.params.cid);
+      if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
+      const body = String(req.body?.body ?? "").trim();
+      if (!body) return reply.code(400).send({ error: "comment body required" });
+      try {
+        return updateCommentBody(db, id, cid, body);
+      } catch (err) {
+        return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
   app.delete<{ Params: { id: string; cid: string } }>("/api/prs/:id/comments/:cid", async (req, reply) => {
     const id = Number(req.params.id), cid = Number(req.params.cid);
     if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
@@ -394,8 +406,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       setFindingSelected(db, fid, !!req.body?.selected);
       return { ok: true };
     });
-  // Edit a finding's text before posting.
-  app.patch<{ Params: { id: string; fid: string }; Body: { what?: string; why?: string; suggestedFix?: string } }>(
+  // Edit a finding's text (and your note) before posting.
+  app.patch<{ Params: { id: string; fid: string }; Body: { what?: string; why?: string; suggestedFix?: string; reviewerNote?: string | null } }>(
     "/api/prs/:id/findings/:fid", async (req, reply) => {
       const id = Number(req.params.id), fid = Number(req.params.fid);
       if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
@@ -408,6 +420,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...(b.what !== undefined ? { what: String(b.what) } : {}),
           ...(b.why !== undefined ? { why: String(b.why) } : {}),
           ...(b.suggestedFix !== undefined ? { suggestedFix: String(b.suggestedFix) } : {}),
+          ...(b.reviewerNote !== undefined ? { reviewerNote: b.reviewerNote === null ? null : String(b.reviewerNote) } : {}),
         });
       } catch (err) {
         return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });

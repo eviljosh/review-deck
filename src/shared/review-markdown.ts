@@ -83,6 +83,7 @@ export function buildReviewMarkdown(
         !f.selected ? "deselected by reviewer" : null,
       ].filter(Boolean).join(" · ");
       lines.push("", `### ${i + 1}. ${loc} — ${f.what}`, "", `_${tags}_`);
+      if (f.reviewerNote?.trim()) lines.push("", `**Reviewer's note:** ${f.reviewerNote.trim()}`);
       if (f.why?.trim()) lines.push("", f.why.trim());
       if (f.suggestedFix?.trim()) lines.push("", `**Suggested fix:** ${f.suggestedFix.trim()}`);
     });
