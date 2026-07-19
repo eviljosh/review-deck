@@ -161,8 +161,11 @@ function FindingCard({
           title={f.selected ? "Will be posted — uncheck to drop" : "Check to include in the posted review"}
           onChange={(e) => onToggle(f, e.target.checked)}
         />
-        {f.impact && <span className={`impact-pill impact-${f.impact}`}>{f.impact}</span>}
-        <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
+        {f.impact ? (
+          <span className={`impact-pill impact-${f.impact}`} title={`priority relative to the PR's goal (engine rated: ${f.severity})`}>{f.impact}</span>
+        ) : (
+          <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
+        )}
         {f.agreement && <span title="both engines flagged this">🤝</span>}
         <span className="f-engine">{f.engine}</span>
         {f.theme && <span className="wt-theme" title="theme">{f.theme}</span>}

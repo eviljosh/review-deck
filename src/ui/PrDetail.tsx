@@ -117,8 +117,11 @@ function Finding({
       />
       <div className="f-body">
         <div className="f-head">
-          {f.impact && <span className={`impact-pill impact-${f.impact}`} title="priority relative to the PR's goal">{f.impact}</span>}
-          <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
+          {f.impact ? (
+            <span className={`impact-pill impact-${f.impact}`} title={`priority relative to the PR's goal (engine rated: ${f.severity})`}>{f.impact}</span>
+          ) : (
+            <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
+          )}
           <span className="f-loc">
             {f.file}
             {f.line ? `:${f.line}` : ""}
