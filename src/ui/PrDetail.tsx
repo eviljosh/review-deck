@@ -20,7 +20,7 @@ import {
 import { DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill } from "./bits.tsx";
 import { Walkthrough } from "./Walkthrough.tsx";
 import { ChatPane } from "./ChatPane.tsx";
-import { buildReviewMarkdown } from "./reviewMarkdown.ts";
+import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import type { ChatStream } from "./useLivePrs.ts";
 
 function parseList(json: string | null): string[] {

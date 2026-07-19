@@ -405,6 +405,26 @@ test("comments CRUD: add, list, delete; GET /api/prs/:id/diff serves the diff", 
   assert.match(diff.json().diff, /diff --git/);
 });
 
+test("GET /api/prs/:id/review.md serves the review brief as markdown", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { title: "Add retries", summary: "Adds a retry wrapper.", review_verdict: "Solid." });
+  insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x.ts", line: 3, side: "RIGHT", what: "unbounded loop", why: "y", suggestedFix: "cap it", anchorable: true, agreement: false });
+
+  const res = await app.inject({ method: "GET", url: `/api/prs/${id}/review.md` });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"] as string, /text\/markdown/);
+  assert.match(res.body, /# Code review: Add retries/);
+  assert.match(res.body, /## Bottom line/);
+  assert.match(res.body, /unbounded loop/);
+  assert.match(res.body, /gh pr checkout 5 --repo o\/r/);
+
+  const missing = await app.inject({ method: "GET", url: "/api/prs/999/review.md" });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("GET/PUT /api/settings round-trips a config patch", async () => {
   const app = buildApp(deps());
   const before = await app.inject({ method: "GET", url: "/api/settings" });

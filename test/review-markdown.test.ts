@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, insertPr, updatePr, insertFinding, listFindings } from "../src/server/db.ts";
-import { buildReviewMarkdown } from "../src/ui/reviewMarkdown.ts";
+import { buildReviewMarkdown } from "../src/shared/review-markdown.ts";
 
 function seedReviewed() {
   const db = openDb(":memory:");

@@ -1,4 +1,4 @@
-import type { PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import type { PrRecord, StoredFinding, UserComment } from "./types.ts";
 
 function parseJsonList(json: string | null): string[] {
   if (!json) return [];

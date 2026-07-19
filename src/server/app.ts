@@ -9,6 +9,7 @@ import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type Stage } from "../shared/types.ts";
 import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, listChatMessages, clearChatMessages } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
+import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { fetchPrStatus } from "./gh.ts";
 import { parsePrUrl } from "./parse-url.ts";
 import { runPipeline } from "./pipeline.ts";
@@ -215,6 +216,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
     return listRuns(db, id);
+  });
+
+  // The whole review as a self-contained markdown brief — pipe it straight
+  // into a CLI agent session: curl -s localhost:3001/api/prs/12/review.md | claude
+  app.get<{ Params: { id: string } }>("/api/prs/:id/review.md", async (req, reply) => {
+    const id = Number(req.params.id);
+    const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+    if (!pr) return reply.code(404).send({ error: "pr not found" });
+    reply.type("text/markdown; charset=utf-8");
+    return buildReviewMarkdown(pr, listFindings(db, id), listComments(db, id));
   });
 
   // The pinned diff the review was computed against (falls back to live gh).

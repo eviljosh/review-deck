@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
 import { addComment, getDiff, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile } from "./diffParse.ts";
-import { buildReviewMarkdown } from "./reviewMarkdown.ts";
+import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
 import type { ChatStream } from "./useLivePrs.ts";
