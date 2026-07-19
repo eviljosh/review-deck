@@ -468,6 +468,22 @@ export function PrDetail({
               onClick={async () => {
                 setPosting(true);
                 try {
+                  // Staleness check: if the author pushed since this review was
+                  // pinned, confirm before posting. Best-effort — a failed
+                  // status fetch never blocks posting.
+                  if (pr.head_sha) {
+                    const remote = await refreshStatus(pr.id).catch(() => null);
+                    if (remote?.headSha && remote.headSha !== pr.head_sha) {
+                      const ok = confirm(
+                        `The author pushed new commits since this review ` +
+                        `(reviewed ${pr.head_sha.slice(0, 8)}, head is now ${remote.headSha.slice(0, 8)}).\n\n` +
+                        `Comments will still anchor to the reviewed commit — lines that changed since ` +
+                        `will show as "outdated" on GitHub.\n\n` +
+                        `Post anyway? (Cancel to keep editing; use ↻ Retry to re-review the new head.)`,
+                      );
+                      if (!ok) return;
+                    }
+                  }
                   const r = await postReview(pr.id);
                   if (!r.ok) alert(r.error);
                 } finally {

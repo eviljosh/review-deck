@@ -74,9 +74,17 @@ export async function markSeen(id: number): Promise<void> {
   await fetch(`/api/prs/${id}/seen`, { method: "POST" });
 }
 
-export async function refreshStatus(id: number): Promise<void> {
+export interface PrRemoteStatus {
+  state: string;
+  mergeable: string;
+  reviewDecision: string;
+  checks: string;
+  headSha: string;
+}
+export async function refreshStatus(id: number): Promise<PrRemoteStatus> {
   const res = await fetch(`/api/prs/${id}/refresh-status`, { method: "POST" });
   if (!res.ok) throw new Error(`refresh failed: ${res.status}`);
+  return (await res.json()).status;
 }
 
 export async function getFindings(id: number): Promise<StoredFinding[]> {
