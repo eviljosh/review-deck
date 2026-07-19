@@ -589,6 +589,29 @@ a:hover { text-decoration: underline; }
 .select-toggles { margin-left: 10px; font-weight: 400; }
 .select-toggles .btn { margin-left: 4px; }
 
+/* ---------- collapsed sections with a visible affordance ---------- */
+
+.fold-cta > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.fold-cta > summary::-webkit-details-marker { display: none; }
+.fold-cta > summary:hover { background: var(--accent-soft); border-color: var(--accent); }
+.fold-cta > summary .fold-title { font-weight: 600; font-size: 13.5px; }
+.fold-cta > summary .fold-hint { color: var(--accent); font-size: 12px; white-space: nowrap; }
+.fold-cta[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fold-cta[open] > summary .fold-hint { visibility: hidden; }
+.fold-cta > .fold-body {
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  margin: 0; padding: 10px 12px 10px 28px;
+}
+
 /* ---------- goal & verdict ---------- */
 
 .goal-section h3 { display: flex; align-items: center; gap: 8px; }
@@ -773,6 +796,25 @@ tr.dl-widget > td { padding: 6px 10px 6px 46px; background: var(--bg); border-to
 .wt-finding.sev-moderate { border-left-color: var(--amber); }
 .wt-finding.sev-optional { border-left-color: var(--border); }
 .wt-theme { font-size: 11px; color: var(--text-muted); font-style: italic; }
+
+.wt-filesection { border-bottom: 2px solid var(--border); }
+.wt-filehead-role {
+  color: var(--text-muted); font-family: var(--sans); font-size: 11.5px; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.wt-selcount { margin-left: 12px; color: var(--text-muted); font-size: 12px; }
+
+.wt-finding-off { opacity: 0.55; }
+.wt-edit-btn { margin-left: auto; }
+.wt-finding-editor { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.wt-finding-editor label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.wt-finding-editor textarea {
+  min-height: 44px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 5px 8px; font-family: var(--sans); font-size: 13px; font-weight: 400; color: var(--text);
+}
+.wt-mini-finding { display: flex; align-items: baseline; gap: 6px; }
+.wt-mini-finding input[type="checkbox"] { position: relative; top: 2px; flex-shrink: 0; }
 
 .wt-comment {
   background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius);

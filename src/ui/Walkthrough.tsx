@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
-import { addComment, getDiff, getFindings, listComments, removeComment } from "./api.ts";
+import { addComment, getDiff, getFindings, listComments, removeComment, setFindingSelected, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile } from "./diffParse.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
@@ -25,19 +25,86 @@ function orderFiles(files: DiffFile[], guide: FileGuideEntry[]): DiffFile[] {
   return [...files].sort((a, b) => (rank.get(a.path) ?? 999) - (rank.get(b.path) ?? 999));
 }
 
-function FindingCard({ f }: { f: StoredFinding }) {
+function FindingCard({
+  f,
+  posted,
+  onToggle,
+  onSave,
+}: {
+  f: StoredFinding;
+  posted: boolean;
+  onToggle: (f: StoredFinding, checked: boolean) => void;
+  onSave: (fid: number, patch: { what: string; why: string; suggestedFix: string }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [what, setWhat] = useState(f.what);
+  const [why, setWhy] = useState(f.why);
+  const [fix, setFix] = useState(f.suggestedFix);
+  const [saving, setSaving] = useState(false);
+
+  function startEdit() {
+    setWhat(f.what);
+    setWhy(f.why);
+    setFix(f.suggestedFix);
+    setEditing(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(f.id, { what, why, suggestedFix: fix });
+      setEditing(false);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className={`wt-finding sev-${f.severity}`}>
+    <div className={`wt-finding sev-${f.severity} ${f.selected ? "" : "wt-finding-off"}`}>
       <div className="f-head">
+        <input
+          type="checkbox"
+          checked={f.selected}
+          disabled={posted}
+          title={f.selected ? "Will be posted — uncheck to drop" : "Check to include in the posted review"}
+          onChange={(e) => onToggle(f, e.target.checked)}
+        />
         {f.impact && <span className={`impact-pill impact-${f.impact}`}>{f.impact}</span>}
         <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
         {f.agreement && <span title="both engines flagged this">🤝</span>}
         <span className="f-engine">{f.engine}</span>
         {f.theme && <span className="wt-theme" title="theme">{f.theme}</span>}
+        {!posted && !editing && (
+          <button className="btn btn-sm btn-ghost wt-edit-btn" title="Edit before posting" onClick={startEdit}>✎</button>
+        )}
       </div>
-      <div className="f-what"><Md inline>{f.what}</Md></div>
-      {f.why && <div className="f-why"><Md inline>{f.why}</Md></div>}
-      {f.suggestedFix && <div className="f-fix">Fix: <Md inline>{f.suggestedFix}</Md></div>}
+      {editing ? (
+        <div className="wt-finding-editor">
+          <label>What
+            <textarea value={what} onChange={(e) => setWhat(e.target.value)} />
+          </label>
+          <label>Why
+            <textarea value={why} onChange={(e) => setWhy(e.target.value)} />
+          </label>
+          <label>Suggested fix
+            <textarea value={fix} onChange={(e) => setFix(e.target.value)} />
+          </label>
+          <div className="wt-composer-actions">
+            <button className="btn btn-sm btn-primary" disabled={saving || !what.trim()} onClick={save}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="f-what"><Md inline>{f.what}</Md></div>
+          {f.why && <div className="f-why"><Md inline>{f.why}</Md></div>}
+          {f.suggestedFix && <div className="f-fix">Fix: <Md inline>{f.suggestedFix}</Md></div>}
+        </>
+      )}
     </div>
   );
 }
@@ -78,9 +145,11 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
   const [diffError, setDiffError] = useState<string | null>(null);
   const [findings, setFindings] = useState<StoredFinding[]>([]);
   const [comments, setComments] = useState<UserComment[]>([]);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  // Line the comment composer is open on (RIGHT-side line number), if any.
-  const [composerLine, setComposerLine] = useState<number | null>(null);
+  // File the context pane describes: the one clicked, or the one scrolled into view.
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
+  // Where the comment composer is open, if anywhere.
+  const [composer, setComposer] = useState<{ file: string; line: number } | null>(null);
+  const diffScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getDiff(pr.id).then(setDiffText).catch((e) => setDiffError(String(e)));
@@ -108,7 +177,28 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
     () => (diffText === null ? [] : orderFiles(parseUnifiedDiff(diffText), guide)),
     [diffText, pr.file_guide],
   );
-  const current = files.find((f) => f.path === selectedPath) ?? files[0] ?? null;
+
+  // All files render stacked in one scroll; track which one is at the top of
+  // the viewport so the context pane follows along.
+  useEffect(() => {
+    const rootEl = diffScrollRef.current;
+    if (!rootEl || files.length === 0) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const path = (visible[0]?.target as HTMLElement | undefined)?.dataset.path;
+        if (path) setCurrentPath(path);
+      },
+      // A section counts as "current" while its top edge is in the upper third.
+      { root: rootEl, rootMargin: "0px 0px -66% 0px" },
+    );
+    for (const el of rootEl.querySelectorAll("[data-path]")) obs.observe(el);
+    return () => obs.disconnect();
+  }, [files]);
+
+  const current = files.find((f) => f.path === currentPath) ?? files[0] ?? null;
   const roleOf = (path: string) => guide.find((g) => g.path === path)?.role ?? null;
 
   const findingsByFile = useMemo(() => {
@@ -120,25 +210,31 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
     return m;
   }, [findings]);
 
+  const posted = pr.stage === "posted";
   const fileFindings = current ? findingsByFile.get(current.path) ?? [] : [];
   const fileComments = current ? comments.filter((c) => c.file === current.path) : [];
-  // Anchored AI findings render inline at their line; the rest go in the side pane.
-  const inlineFindings = new Map<number, StoredFinding[]>();
-  for (const f of fileFindings) {
-    if (f.line !== null && f.side === "RIGHT") {
-      if (!inlineFindings.has(f.line)) inlineFindings.set(f.line, []);
-      inlineFindings.get(f.line)!.push(f);
-    }
-  }
-  const unanchored = fileFindings.filter((f) => f.line === null || f.side !== "RIGHT");
-  const posted = pr.stage === "posted";
 
-  async function submitComment(line: number | null, body: string) {
-    if (!current) return;
+  const toggleFinding = (f: StoredFinding, checked: boolean) => {
+    setFindingSelected(pr.id, f.id, checked).catch(() => {});
+    setFindings((fs) => fs.map((x) => (x.id === f.id ? { ...x, selected: checked } : x)));
+  };
+  const saveFinding = async (fid: number, patch: { what: string; why: string; suggestedFix: string }) => {
+    const saved = await updateFinding(pr.id, fid, patch);
+    setFindings((fs) => fs.map((x) => (x.id === fid ? saved : x)));
+  };
+
+  function scrollToFile(path: string) {
+    setCurrentPath(path);
+    setComposer(null);
+    const el = diffScrollRef.current?.querySelector(`[data-path="${CSS.escape(path)}"]`);
+    el?.scrollIntoView({ block: "start" });
+  }
+
+  async function submitComment(file: string, line: number, body: string) {
     try {
-      const created = await addComment(pr.id, { file: current.path, line, body });
+      const created = await addComment(pr.id, { file, line, body });
       setComments((cs) => [...cs, created]);
-      setComposerLine(null);
+      setComposer(null);
     } catch (e) {
       alert(String(e));
     }
@@ -153,12 +249,15 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
     }
   }
 
+  const selectedCount = findings.filter((f) => f.selected).length;
+
   return (
     <div className="walkthrough-overlay">
       <div className="wt-header">
         <div className="wt-title">
           <strong>#{pr.number}</strong> {pr.title ?? ""}
           <span className="wt-repo">{pr.owner}/{pr.repo}</span>
+          <span className="wt-selcount">{selectedCount} finding{selectedCount === 1 ? "" : "s"} selected</span>
         </div>
         <div className="wt-header-right">
           {pr.review_verdict && <span className="wt-verdict"><Md inline>{pr.review_verdict}</Md></span>}
@@ -168,10 +267,9 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
 
       {diffError && <div className="error-banner">{diffError}</div>}
       {diffText === null && !diffError && <div className="empty-state">Loading diff…</div>}
-
       {diffText !== null && files.length === 0 && <div className="empty-state">No parseable diff for this PR.</div>}
 
-      {current && (
+      {files.length > 0 && (
         <div className="wt-body">
           <div className="wt-files">
             {files.map((f, i) => {
@@ -181,8 +279,8 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
               return (
                 <div
                   key={f.path}
-                  className={`wt-file ${f.path === current.path ? "selected" : ""}`}
-                  onClick={() => { setSelectedPath(f.path); setComposerLine(null); }}
+                  className={`wt-file ${current && f.path === current.path ? "selected" : ""}`}
+                  onClick={() => scrollToFile(f.path)}
                 >
                   <span className="wt-file-order">{guide.length > 0 ? i + 1 : ""}</span>
                   <span className="wt-file-path" title={f.path}>{f.path}</span>
@@ -200,63 +298,80 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
             })}
           </div>
 
-          <div className="wt-diff">
-            <div className="wt-diff-filehead">
-              {current.status !== "modified" && <span className={`badge wt-status-${current.status}`}>{current.status}</span>}
-              <span className="wt-diff-path">{current.path}</span>
-            </div>
-            <table className="difftable">
-              <tbody>
-                {current.lines.map((l, i) => (
-                  l.kind === "hunk" ? (
-                    <tr key={i} className="dl-hunk"><td className="dl-no" /><td className="dl-no" /><td className="dl-text">{l.text}</td></tr>
-                  ) : (
-                    <Fragment key={i}>
-                      <tr className={`dl-${l.kind}`}>
-                        <td className="dl-no">{l.oldNo ?? ""}</td>
-                        <td className="dl-no dl-no-new" onClick={() => { if (l.newNo !== null && !posted) setComposerLine(l.newNo); }}
-                          title={l.newNo !== null && !posted ? "Comment on this line" : undefined}>
-                          {l.newNo ?? ""}
-                          {l.newNo !== null && !posted && <span className="dl-plus">＋</span>}
-                        </td>
-                        <td className="dl-text">
-                          <span className="dl-marker">{l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}</span>
-                          {l.text}
-                        </td>
-                      </tr>
-                      {l.newNo !== null && inlineFindings.has(l.newNo) &&
-                        inlineFindings.get(l.newNo)!.map((f) => (
-                          <tr key={`f-${f.id}`} className="dl-widget"><td colSpan={3}><FindingCard f={f} /></td></tr>
-                        ))}
-                      {l.newNo !== null && fileComments.filter((c) => c.line === l.newNo).map((c) => (
-                        <tr key={`c-${c.id}`} className="dl-widget">
-                          <td colSpan={3}>
-                            <div className="wt-comment">
-                              <span className="wt-comment-tag">💬 you{c.posted ? " · posted" : ""}</span>
-                              <Md inline>{c.body}</Md>
-                              {!c.posted && (
-                                <button className="btn btn-sm btn-ghost" onClick={() => dropComment(c.id)}>✕</button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+          <div className="wt-diff" ref={diffScrollRef}>
+            {files.map((file) => {
+              const inline = new Map<number, StoredFinding[]>();
+              for (const f of findingsByFile.get(file.path) ?? []) {
+                if (f.line !== null && f.side === "RIGHT") {
+                  if (!inline.has(f.line)) inline.set(f.line, []);
+                  inline.get(f.line)!.push(f);
+                }
+              }
+              const fComments = comments.filter((c) => c.file === file.path);
+              return (
+                <section key={file.path} data-path={file.path} className="wt-filesection">
+                  <div className="wt-diff-filehead">
+                    {file.status !== "modified" && <span className={`badge wt-status-${file.status}`}>{file.status}</span>}
+                    <span className="wt-diff-path">{file.path}</span>
+                    {roleOf(file.path) && <span className="wt-filehead-role" title={roleOf(file.path)!}>{roleOf(file.path)}</span>}
+                  </div>
+                  <table className="difftable">
+                    <tbody>
+                      {file.lines.map((l, i) => (
+                        l.kind === "hunk" ? (
+                          <tr key={i} className="dl-hunk"><td className="dl-no" /><td className="dl-no" /><td className="dl-text">{l.text}</td></tr>
+                        ) : (
+                          <Fragment key={i}>
+                            <tr className={`dl-${l.kind}`}>
+                              <td className="dl-no">{l.oldNo ?? ""}</td>
+                              <td className="dl-no dl-no-new" onClick={() => { if (l.newNo !== null && !posted) setComposer({ file: file.path, line: l.newNo }); }}
+                                title={l.newNo !== null && !posted ? "Comment on this line" : undefined}>
+                                {l.newNo ?? ""}
+                                {l.newNo !== null && !posted && <span className="dl-plus">＋</span>}
+                              </td>
+                              <td className="dl-text">
+                                <span className="dl-marker">{l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}</span>
+                                {l.text}
+                              </td>
+                            </tr>
+                            {l.newNo !== null && inline.has(l.newNo) &&
+                              inline.get(l.newNo)!.map((f) => (
+                                <tr key={`f-${f.id}`} className="dl-widget">
+                                  <td colSpan={3}><FindingCard f={f} posted={posted} onToggle={toggleFinding} onSave={saveFinding} /></td>
+                                </tr>
+                              ))}
+                            {l.newNo !== null && fComments.filter((c) => c.line === l.newNo).map((c) => (
+                              <tr key={`c-${c.id}`} className="dl-widget">
+                                <td colSpan={3}>
+                                  <div className="wt-comment">
+                                    <span className="wt-comment-tag">💬 you{c.posted ? " · posted" : ""}</span>
+                                    <Md inline>{c.body}</Md>
+                                    {!c.posted && (
+                                      <button className="btn btn-sm btn-ghost" onClick={() => dropComment(c.id)}>✕</button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {composer !== null && composer.file === file.path && l.newNo === composer.line && (
+                              <tr className="dl-widget">
+                                <td colSpan={3}>
+                                  <CommentComposer onSubmit={(b) => submitComment(file.path, composer.line, b)} onCancel={() => setComposer(null)} />
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
                       ))}
-                      {composerLine !== null && l.newNo === composerLine && (
-                        <tr className="dl-widget">
-                          <td colSpan={3}>
-                            <CommentComposer onSubmit={(b) => submitComment(composerLine, b)} onCancel={() => setComposerLine(null)} />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  )
-                ))}
-              </tbody>
-            </table>
+                    </tbody>
+                  </table>
+                </section>
+              );
+            })}
           </div>
 
           <div className="wt-context">
-            {roleOf(current.path) && (
+            {current && roleOf(current.path) && (
               <div className="wt-section">
                 <h4>This file's role</h4>
                 <Md>{roleOf(current.path)!}</Md>
@@ -269,13 +384,13 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
               </div>
             )}
             <div className="wt-section">
-              <h4>Findings here ({fileFindings.length})</h4>
+              <h4>Findings in {current ? current.path.split("/").pop() : "file"} ({fileFindings.length})</h4>
               {fileFindings.length === 0 && <div className="wt-quiet">None in this file.</div>}
-              {unanchored.map((f) => <FindingCard key={f.id} f={f} />)}
-              {fileFindings.filter((f) => !unanchored.includes(f)).map((f) => (
+              {fileFindings.map((f) => (
                 <div key={f.id} className="wt-mini-finding">
+                  <input type="checkbox" checked={f.selected} disabled={posted} onChange={(e) => toggleFinding(f, e.target.checked)} />
                   {f.impact && <span className={`impact-pill impact-${f.impact}`}>{f.impact}</span>}
-                  <span className="wt-mini-line">:{f.line}</span> <Md inline>{f.what}</Md>
+                  <span className="wt-mini-line">{f.line !== null ? `:${f.line}` : ""}</span> <Md inline>{f.what}</Md>
                 </div>
               ))}
             </div>

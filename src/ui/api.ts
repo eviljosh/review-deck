@@ -100,6 +100,17 @@ export async function setFindingSelected(prId: number, fid: number, selected: bo
 export async function setAllFindingsSelected(prId: number, selected: boolean): Promise<void> {
   await fetch(`/api/prs/${prId}/findings/select-all`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selected }) });
 }
+export async function updateFinding(
+  prId: number,
+  fid: number,
+  patch: { what?: string; why?: string; suggestedFix?: string },
+): Promise<StoredFinding> {
+  const res = await fetch(`/api/prs/${prId}/findings/${fid}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`finding update failed: ${res.status}`);
+  return res.json();
+}
 export async function postReview(id: number): Promise<{ ok: boolean; stage?: string; error?: string }> {
   const res = await fetch(`/api/prs/${id}/post`, { method: "POST" });
   return res.json();

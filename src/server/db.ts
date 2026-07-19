@@ -395,6 +395,26 @@ export function setAllFindingsSelected(db: Database.Database, prId: number, sele
   db.prepare("UPDATE findings SET selected = ? WHERE pr_id = ? AND posted = 0").run(selected ? 1 : 0, prId);
 }
 
+/** Edit a finding's text before posting (what / why / suggested fix). */
+export function updateFindingText(
+  db: Database.Database,
+  findingId: number,
+  patch: { what?: string; why?: string; suggestedFix?: string },
+): import("../shared/types.ts").StoredFinding {
+  const sets: string[] = [];
+  const params: Record<string, unknown> = { id: findingId };
+  if (patch.what !== undefined) { sets.push("what = @what"); params.what = patch.what; }
+  if (patch.why !== undefined) { sets.push("why = @why"); params.why = patch.why; }
+  if (patch.suggestedFix !== undefined) { sets.push("suggested_fix = @fix"); params.fix = patch.suggestedFix; }
+  if (sets.length > 0) {
+    const info = db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = @id AND posted = 0`).run(params);
+    if (info.changes === 0) throw new Error(`finding ${findingId} not found (or already posted)`);
+  }
+  const row = getFinding(db, findingId);
+  if (!row) throw new Error(`finding ${findingId} not found`);
+  return row;
+}
+
 // ---------- finding feedback (what the reviewer accepted vs. rejected) ----------
 
 /**

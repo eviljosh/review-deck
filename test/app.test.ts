@@ -180,6 +180,26 @@ test("POST /api/prs/:id/findings/select-all flips every unposted finding", async
   assert.ok(listFindings(d.db, id).every((f) => !f.selected));
 });
 
+test("PATCH /api/prs/:id/findings/:fid edits text until posted, then 409s", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const f = insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x", line: 1, side: "RIGHT", what: "orig", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
+
+  const patch = await app.inject({ method: "PATCH", url: `/api/prs/${id}/findings/${f.id}`, payload: { what: "edited", suggestedFix: "better fix" } });
+  assert.equal(patch.statusCode, 200);
+  assert.equal(patch.json().what, "edited");
+  const stored = listFindings(d.db, id)[0];
+  assert.equal(stored.what, "edited");
+  assert.equal(stored.suggestedFix, "better fix");
+  assert.equal(stored.why, "y"); // untouched field preserved
+
+  d.db.prepare("UPDATE findings SET posted = 1 WHERE id = ?").run(f.id);
+  const locked = await app.inject({ method: "PATCH", url: `/api/prs/${id}/findings/${f.id}`, payload: { what: "nope" } });
+  assert.equal(locked.statusCode, 409);
+});
+
 test("archive removes the worktree and clears worktree_path", async () => {
   const d = deps();
   const calls: string[][] = [];

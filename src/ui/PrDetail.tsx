@@ -193,6 +193,11 @@ export function PrDetail({
     listComments(pr.id).then((cs) => setCommentCount(cs.filter((c) => !c.posted).length)).catch(() => {});
   }, [pr.id, findingsBump, walkthrough]);
 
+  // Selections/edits made inside the walkthrough must show when it closes.
+  useEffect(() => {
+    if (!walkthrough) getFindings(pr.id).then(setFindings).catch(() => {});
+  }, [walkthrough, pr.id]);
+
   const [runs, setRuns] = useState<RunRecord[]>([]);
   useEffect(() => {
     getRuns(pr.id).then(setRuns).catch(() => {});
@@ -330,6 +335,15 @@ export function PrDetail({
           </div>
         )}
 
+        {pr.review_verdict && (
+          <div className="section">
+            <div className="review-verdict">
+              <span className="verdict-label">Bottom line</span>
+              <Md>{pr.review_verdict}</Md>
+            </div>
+          </div>
+        )}
+
         {pr.goal && (
           <div className="section goal-section">
             <h3>
@@ -367,8 +381,11 @@ export function PrDetail({
 
         {reasons.length > 0 && (
           <div className="section">
-            <details className="fold">
-              <summary><span className="fold-title">Why this rating</span></summary>
+            <details className="fold fold-cta">
+              <summary>
+                <span className="fold-title">Why this rating</span>
+                <span className="fold-hint">{reasons.length} reason{reasons.length === 1 ? "" : "s"} · click to view</span>
+              </summary>
               <ul className="fold-body">
                 {reasons.map((r, i) => (
                   <li key={i}><Md inline>{r}</Md></li>
@@ -380,12 +397,17 @@ export function PrDetail({
 
         {focus.length > 0 && (
           <div className="section">
-            <h3>Focus your review on</h3>
-            <ul>
-              {focus.map((f, i) => (
-                <li key={i}><Md inline>{f}</Md></li>
-              ))}
-            </ul>
+            <details className="fold fold-cta">
+              <summary>
+                <span className="fold-title">Focus your review on</span>
+                <span className="fold-hint">{focus.length} area{focus.length === 1 ? "" : "s"} · click to view</span>
+              </summary>
+              <ul className="fold-body">
+                {focus.map((f, i) => (
+                  <li key={i}><Md inline>{f}</Md></li>
+                ))}
+              </ul>
+            </details>
           </div>
         )}
 
@@ -411,12 +433,6 @@ export function PrDetail({
 
         {findings.length > 0 && (
           <div className="section">
-            {pr.review_verdict && (
-              <div className="review-verdict">
-                <span className="verdict-label">Bottom line</span>
-                <Md>{pr.review_verdict}</Md>
-              </div>
-            )}
             <h3>
               Findings ({findings.length}){showGate ? ` · ${selectedCount} selected` : ""}
               {showGate && !posted && (

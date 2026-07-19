@@ -7,7 +7,7 @@ import type { LlmEngine } from "./engines/types.ts";
 import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type Stage } from "../shared/types.ts";
-import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, listChatMessages, clearChatMessages } from "./db.ts";
+import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, listChatMessages, clearChatMessages } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { fetchPrStatus } from "./gh.ts";
 import { parsePrUrl } from "./parse-url.ts";
@@ -330,6 +330,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (!listFindings(db, id).some((f) => f.id === fid)) return reply.code(404).send({ error: "finding not found" });
       setFindingSelected(db, fid, !!req.body?.selected);
       return { ok: true };
+    });
+  // Edit a finding's text before posting.
+  app.patch<{ Params: { id: string; fid: string }; Body: { what?: string; why?: string; suggestedFix?: string } }>(
+    "/api/prs/:id/findings/:fid", async (req, reply) => {
+      const id = Number(req.params.id), fid = Number(req.params.fid);
+      if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
+      const finding = listFindings(db, id).find((f) => f.id === fid);
+      if (!finding) return reply.code(404).send({ error: "finding not found" });
+      if (finding.posted) return reply.code(409).send({ error: "finding already posted" });
+      const b = req.body ?? {};
+      try {
+        return updateFindingText(db, fid, {
+          ...(b.what !== undefined ? { what: String(b.what) } : {}),
+          ...(b.why !== undefined ? { why: String(b.why) } : {}),
+          ...(b.suggestedFix !== undefined ? { suggestedFix: String(b.suggestedFix) } : {}),
+        });
+      } catch (err) {
+        return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
+      }
     });
   app.post<{ Params: { id: string }; Body: { selected: boolean } }>(
     "/api/prs/:id/findings/select-all", async (req, reply) => {
