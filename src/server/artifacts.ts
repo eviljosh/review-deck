@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 export function stageArtifactDir(dataDir: string, prId: number, stage: string): string {
@@ -9,6 +9,15 @@ export function writeArtifacts(dir: string, files: Record<string, string>): void
   mkdirSync(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(dir, name), content);
+  }
+}
+
+/** Delete every artifact for a PR (called when the PR itself is deleted). */
+export function removeArtifacts(dataDir: string, prId: number): void {
+  try {
+    rmSync(join(dataDir, "artifacts", String(prId)), { recursive: true, force: true });
+  } catch {
+    // best-effort — leftover artifacts are only a disk-space concern
   }
 }
 

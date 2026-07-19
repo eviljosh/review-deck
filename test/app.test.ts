@@ -269,6 +269,22 @@ test("DELETE /api/prs/:id removes the worktree when one exists", async () => {
   assert.ok(calls.some((c) => c.join(" ").includes("worktree remove --force /data/worktrees/pr-1")));
 });
 
+test("DELETE /api/prs/:id removes the PR's artifacts directory", async () => {
+  const d = deps();
+  const { mkdtempSync, existsSync } = await import("node:fs");
+  d.dataDir = mkdtempSync(`${process.env.SCRATCH ?? "/tmp"}/art-del-`);
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  const { stageArtifactDir, writeArtifacts } = await import("../src/server/artifacts.ts");
+  const dir = stageArtifactDir(d.dataDir, pr.id, "triage");
+  writeArtifacts(dir, { "raw.txt": "model output" });
+  assert.ok(existsSync(dir));
+
+  const res = await app.inject({ method: "DELETE", url: `/api/prs/${pr.id}` });
+  assert.equal(res.statusCode, 200);
+  assert.ok(!existsSync(dir), "artifacts dir should be removed with the PR");
+});
+
 test("DELETE /api/prs/:id 404s for a missing pr", async () => {
   const res = await buildApp(deps()).inject({ method: "DELETE", url: "/api/prs/9999" });
   assert.equal(res.statusCode, 404);

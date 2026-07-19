@@ -10,6 +10,7 @@ import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type Stage } from "../shared/types.ts";
 import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, listChatMessages, clearChatMessages } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
+import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { fetchPrStatus } from "./gh.ts";
 import { parsePrUrl } from "./parse-url.ts";
@@ -62,11 +63,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   }
 
-  // Fully remove a PR: stop any live run, drop its throwaway worktree, delete
-  // the row (findings/runs cascade), and tell clients to drop it.
+  // Fully remove a PR: stop any live run, drop its throwaway worktree and its
+  // artifacts on disk, delete the row (findings/runs/comments/chat cascade),
+  // and tell clients to drop it.
   async function removePr(pr: PrRecord): Promise<void> {
     running.get(pr.id)?.abort();
     await removeWorktree(pr);
+    removeArtifacts(dataDir, pr.id);
     deletePr(db, pr.id);
     hub.broadcast({ type: "pr_deleted", prId: pr.id });
   }

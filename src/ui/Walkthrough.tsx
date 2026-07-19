@@ -407,7 +407,7 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
             })}
           </div>
           <div className="wt-left-chat">
-            <ChatPane pr={pr} stream={chat} />
+            <ChatPane pr={pr} stream={chat} startCollapsed />
           </div>
           </div>
 

@@ -881,6 +881,11 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
   padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
   font-weight: 600; font-size: 13px;
 }
+.chat-head-actions { display: flex; align-items: center; gap: 4px; }
+.chat-collapsed { cursor: pointer; }
+.chat-collapsed .chat-head { border-bottom: none; }
+.chat-collapsed:hover { background: var(--accent-soft); border-color: var(--accent); }
+.chat-expand-hint { color: var(--accent); font-size: 12px; font-weight: 400; }
 .chat-scroll { overflow-y: auto; max-height: 420px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .chat-empty { color: var(--text-muted); font-size: 12.5px; }
 .chat-msg { border-radius: var(--radius); padding: 6px 10px; font-size: 13px; max-width: 92%; }

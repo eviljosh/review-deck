@@ -8,15 +8,30 @@ import { Md } from "./bits.tsx";
  * Live chat about one PR. The assistant runs with the PR's worktree, pinned
  * diff, triage, and findings as context; answers stream over the WebSocket
  * (chat state arrives via the `stream` prop from useLivePrs).
+ * With `startCollapsed`, only the header bar shows until first expanded.
  */
-export function ChatPane({ pr, stream }: { pr: PrRecord; stream: ChatStream | undefined }) {
+export function ChatPane({
+  pr,
+  stream,
+  startCollapsed = false,
+}: {
+  pr: PrRecord;
+  stream: ChatStream | undefined;
+  startCollapsed?: boolean;
+}) {
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [collapsed, setCollapsed] = useState(startCollapsed);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const streaming = stream?.streaming ?? "";
   const bump = stream?.bump ?? 0;
+
+  // A streaming answer means a conversation is in flight — surface it.
+  useEffect(() => {
+    if (streaming) setCollapsed(false);
+  }, [streaming]);
 
   useEffect(() => {
     getChatHistory(pr.id).then(setHistory).catch(() => {});
@@ -44,19 +59,35 @@ export function ChatPane({ pr, stream }: { pr: PrRecord; stream: ChatStream | un
 
   const busy = sending || streaming.length > 0;
 
+  if (collapsed) {
+    return (
+      <div className="chat-pane chat-collapsed" onClick={() => setCollapsed(false)} title="Click to open the chat">
+        <div className="chat-head">
+          <span>💬 Ask about this PR{history.length > 0 ? ` (${history.length})` : ""}</span>
+          <span className="chat-expand-hint">click to open</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-pane">
       <div className="chat-head">
         <span>💬 Ask about this PR</span>
-        {history.length > 0 && (
-          <button
-            className="btn btn-sm btn-ghost"
-            title="Clear chat history"
-            onClick={() => clearChat(pr.id).then(() => setHistory([])).catch(() => {})}
-          >
-            clear
-          </button>
-        )}
+        <span className="chat-head-actions">
+          {history.length > 0 && (
+            <button
+              className="btn btn-sm btn-ghost"
+              title="Clear chat history"
+              onClick={() => clearChat(pr.id).then(() => setHistory([])).catch(() => {})}
+            >
+              clear
+            </button>
+          )}
+          {startCollapsed && (
+            <button className="btn btn-sm btn-ghost" title="Minimize" onClick={() => setCollapsed(true)}>–</button>
+          )}
+        </span>
       </div>
       <div className="chat-scroll" ref={scrollRef}>
         {history.length === 0 && !streaming && (
