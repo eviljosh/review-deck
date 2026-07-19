@@ -111,6 +111,22 @@ the gate; nothing is posted to GitHub until you click **Post**.
 > and sends the diff to Anthropic and OpenAI for review. It never writes to or pushes the
 > target repo, and only posts a review when you explicitly do so.
 
+## Hand a review off to a CLI agent
+
+Reviewing finds the problems; fixing them usually happens in a terminal. Every review is
+available as a self-contained markdown brief — goal + verdict, bottom line, summary, danger
+reasons, focus areas, all findings (with your select/deselect decisions marked), and your own
+comments — ending with the `gh pr checkout` / `git checkout <reviewed-sha>` commands an agent
+needs to pull the actual code.
+
+- **⎘ Copy review** (detail view or walkthrough header) puts the brief on the clipboard —
+  paste it into a Claude Code / Codex / any CLI agent session and go.
+- Or fetch it directly (the PR id is in the URL hash, e.g. `#pr-12`):
+
+  ```bash
+  curl -s localhost:3001/api/prs/12/review.md | claude
+  ```
+
 ## Configuration
 
 Everything configurable lives in the database and is edited in the **⚙ Settings** UI (no
