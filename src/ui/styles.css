@@ -730,13 +730,24 @@ a:hover { text-decoration: underline; }
 .wt-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr 320px;
+  grid-template-columns: 300px 1fr 320px;
   gap: 12px;
   min-height: 0;
   padding-top: 10px;
 }
 
-.wt-files { overflow-y: auto; border-right: 1px solid var(--border-muted); padding-right: 8px; }
+/* Left column: scrollable file list on top, chat pinned at the bottom. */
+.wt-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  border-right: 1px solid var(--border-muted);
+  padding-right: 8px;
+}
+.wt-files { flex: 1; min-height: 80px; overflow-y: auto; }
+.wt-left-chat { flex-shrink: 0; }
+.wt-left-chat .chat-scroll { max-height: 280px; }
 .wt-file {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; border-radius: var(--radius); cursor: pointer;
@@ -836,7 +847,6 @@ tr.dl-widget > td { padding: 6px 10px 6px 46px; background: var(--bg); border-to
   color: var(--text-muted);
 }
 .wt-quiet { color: var(--text-muted); font-size: 12px; }
-.wt-chat .chat-scroll { max-height: 300px; }
 .wt-mini-finding { font-size: 12.5px; padding: 3px 0; border-bottom: 1px solid var(--border-muted); }
 .wt-mini-line { font-family: var(--mono); color: var(--text-muted); font-size: 11px; }
 

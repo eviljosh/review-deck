@@ -93,7 +93,7 @@ test("runSynthesize stores the finalizer's file reading guide", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
   const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    files: [{ path: "x.ts", role: "Core logic of the change." }],
+    files: [{ path: "x.ts", role: "Core logic of the change.", walkthrough: "- `run()` drives the retry loop — unbounded, see finding 1." }],
     findings: [
       { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
     ],
@@ -102,7 +102,9 @@ test("runSynthesize stores the finalizer's file reading guide", async () => {
     { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
     pr.id, raw,
   );
-  assert.deepEqual(JSON.parse(result.file_guide!), [{ path: "x.ts", role: "Core logic of the change." }]);
+  assert.deepEqual(JSON.parse(result.file_guide!), [
+    { path: "x.ts", role: "Core logic of the change.", walkthrough: "- `run()` drives the retry loop — unbounded, see finding 1." },
+  ]);
 });
 
 test("runSynthesize feeds past rejected examples for the repo into the finalizer", async () => {

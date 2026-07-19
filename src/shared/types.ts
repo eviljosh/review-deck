@@ -48,7 +48,8 @@ export interface FindingTheme {
 /** One entry of the walkthrough reading order: a changed file + its role in the change. */
 export interface FileGuideEntry {
   path: string;
-  role: string;
+  role: string;         // one sentence, shown in the file header
+  walkthrough?: string; // short markdown tour: major functions/classes, purpose, problems found
 }
 
 /** A reviewer-authored comment anchored to a diff line, merged into the posted review. */

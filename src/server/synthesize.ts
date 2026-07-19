@@ -13,7 +13,7 @@ import type { EngineModelOptions } from "./review-config.ts";
 
 const finalSchema = z.object({
   verdict: z.string().optional(),
-  files: z.array(z.object({ path: z.string(), role: z.string() })).optional(),
+  files: z.array(z.object({ path: z.string(), role: z.string(), walkthrough: z.string().optional() })).optional(),
   themes: z.array(z.object({ label: z.string(), summary: z.string() })).optional(),
   findings: z.array(z.object({
     dimension: z.string(),

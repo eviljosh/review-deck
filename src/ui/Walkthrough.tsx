@@ -200,7 +200,8 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
   }, [files]);
 
   const current = files.find((f) => f.path === currentPath) ?? files[0] ?? null;
-  const roleOf = (path: string) => guide.find((g) => g.path === path)?.role ?? null;
+  const guideOf = (path: string) => guide.find((g) => g.path === path);
+  const roleOf = (path: string) => guideOf(path)?.role ?? null;
 
   const findingsByFile = useMemo(() => {
     const m = new Map<string, StoredFinding[]>();
@@ -286,6 +287,7 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
 
       {files.length > 0 && (
         <div className="wt-body">
+          <div className="wt-left">
           <div className="wt-files">
             {files.map((f, i) => {
               const ffs = findingsByFile.get(f.path) ?? [];
@@ -311,6 +313,10 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                 </div>
               );
             })}
+          </div>
+          <div className="wt-left-chat">
+            <ChatPane pr={pr} stream={chat} />
+          </div>
           </div>
 
           <div className="wt-diff" ref={diffScrollRef}>
@@ -386,16 +392,21 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
           </div>
 
           <div className="wt-context">
-            {current && roleOf(current.path) && (
+            {current && guideOf(current.path) && (
               <div className="wt-section">
-                <h4>This file's role</h4>
-                <Md>{roleOf(current.path)!}</Md>
+                <h4>This file</h4>
+                <Md>{guideOf(current.path)!.walkthrough?.trim() || guideOf(current.path)!.role}</Md>
               </div>
             )}
             {pr.goal && (
               <div className="wt-section">
-                <h4>PR goal</h4>
-                <Md>{pr.goal}</Md>
+                <details className="fold fold-cta">
+                  <summary>
+                    <span className="fold-title">PR goal</span>
+                    <span className="fold-hint">click to view</span>
+                  </summary>
+                  <div className="fold-body"><Md>{pr.goal}</Md></div>
+                </details>
               </div>
             )}
             <div className="wt-section">
@@ -408,9 +419,6 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                   <span className="wt-mini-line">{f.line !== null ? `:${f.line}` : ""}</span> <Md inline>{f.what}</Md>
                 </div>
               ))}
-            </div>
-            <div className="wt-section wt-chat">
-              <ChatPane pr={pr} stream={chat} />
             </div>
             <div className="wt-section">
               <h4>Your comments ({fileComments.length})</h4>
