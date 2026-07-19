@@ -1,0 +1,535 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { setTimeout } from "node:timers/promises";
+import { openDb, insertFinding, listFindings, getPr, updatePr, insertPr } from "../src/server/db.ts";
+import type { Exec } from "../src/server/exec.ts";
+import type { LlmEngine } from "../src/server/engines/types.ts";
+import type { WsMessage } from "../src/shared/types.ts";
+import { WsHub } from "../src/server/ws.ts";
+import { buildApp } from "../src/server/app.ts";
+import { DEFAULT_REVIEW_CONFIG } from "../src/server/review-config.ts";
+
+const triageJson = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] }, focusAreas: [] });
+const findingsJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f" }] });
+const finalJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", agreement: false }] });
+
+function deps() {
+  const exec: Exec = async (cmd, args) => {
+    if (cmd === "gh" && args[1] === "view") {
+      return {
+        stdout: JSON.stringify({
+          title: "T", author: { login: "u" },
+          additions: 1, deletions: 0, changedFiles: 1,
+        }),
+        stderr: "",
+      };
+    }
+    return { stdout: "diff --git a/x b/x\n+1", stderr: "" };
+  };
+  // Fakes return valid triage/findings/final JSON keyed on the system prompt.
+  const claude: LlmEngine = {
+    name: "claude",
+    run: async (req) =>
+      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : findingsJson }),
+  };
+  const codex: LlmEngine = {
+    name: "codex",
+    run: async (req) =>
+      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : findingsJson }),
+  };
+  return {
+    db: openDb(":memory:"), exec, claude, codex, config: DEFAULT_REVIEW_CONFIG,
+    dataDir: process.env.SCRATCH ?? "/tmp", hub: new WsHub(),
+  };
+}
+
+test("GET /api/health", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "GET", url: "/api/health" });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json(), { ok: true });
+});
+
+test("POST /api/prs creates rows; GET /api/prs lists them", async () => {
+  const app = buildApp(deps());
+  const post = await app.inject({
+    method: "POST",
+    url: "/api/prs",
+    payload: { urls: ["https://github.com/o/r/pull/5"] },
+  });
+  assert.equal(post.statusCode, 200);
+  const created = post.json().created;
+  assert.equal(created.length, 1);
+  assert.equal(created[0].owner, "o");
+
+  const list = await app.inject({ method: "GET", url: "/api/prs" });
+  assert.equal(list.json().length, 1);
+});
+
+test("POST /api/prs with several urls creates all rows under the concurrency limit", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: [
+    "https://github.com/o/r/pull/1","https://github.com/o/r/pull/2","https://github.com/o/r/pull/3" ] } });
+  assert.equal(res.json().created.length, 3);
+});
+
+test("POST /api/prs rejects an invalid url", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/prs",
+    payload: { urls: ["https://github.com/o/r/issues/1"] },
+  });
+  assert.equal(res.statusCode, 400);
+});
+
+test("POST /api/prs drives runPrepare to completion and broadcasts pr_updated over the hub", async () => {
+  const d = deps();
+  const app = buildApp(d);
+
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+
+  const post = await app.inject({
+    method: "POST",
+    url: "/api/prs",
+    payload: { urls: ["https://github.com/o/r/pull/5"] },
+  });
+  assert.equal(post.statusCode, 200);
+  const createdPr = post.json().created[0];
+
+  // The prepare run is fire-and-forget; poll for the broadcast it emits once
+  // it reaches the triage stage.
+  let triageMsg: WsMessage | undefined;
+  for (let waited = 0; waited < 1000; waited += 20) {
+    triageMsg = received.find(
+      (m) => m.type === "pr_updated" && m.pr.stage === "triage",
+    );
+    if (triageMsg) break;
+    await setTimeout(20);
+  }
+
+  if (!triageMsg || triageMsg.type !== "pr_updated") {
+    assert.fail("timed out waiting for pr_updated broadcast with stage 'triage'");
+  }
+  assert.equal(triageMsg.pr.stage, "triage");
+  assert.equal(triageMsg.pr.status, "pending");
+  assert.equal(triageMsg.pr.id, createdPr.id);
+});
+
+test("POST /api/prs dedupes by url and reports the existing record", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const body = { urls: ["https://github.com/o/r/pull/5"] };
+  const first = await app.inject({ method: "POST", url: "/api/prs", payload: body });
+  assert.equal(first.json().created.length, 1);
+  assert.equal(first.json().existing.length, 0);
+
+  const second = await app.inject({ method: "POST", url: "/api/prs", payload: body });
+  assert.equal(second.json().created.length, 0);
+  assert.equal(second.json().existing.length, 1);
+  assert.equal(second.json().existing[0].number, 5);
+
+  const list = await app.inject({ method: "GET", url: "/api/prs" });
+  assert.equal(list.json().length, 1); // still only one row
+});
+
+test("POST /api/prs/:id/retry returns ok for an existing pr", async () => {
+  const app = buildApp(deps());
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const retry = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
+  assert.equal(retry.statusCode, 200);
+  assert.deepEqual(retry.json(), { ok: true });
+});
+
+test("POST /api/prs/:id/retry 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const retry = await app.inject({ method: "POST", url: "/api/prs/999/retry" });
+  assert.equal(retry.statusCode, 404);
+});
+
+test("POST /api/prs/:id/retry 404s for a non-integer id", async () => {
+  const app = buildApp(deps());
+  const retry = await app.inject({ method: "POST", url: "/api/prs/abc/retry" });
+  assert.equal(retry.statusCode, 404);
+});
+
+test("POST /api/prs/:id/retry 409s when the review was already posted", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { stage: "posted", status: "done" });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
+  assert.equal(res.statusCode, 409);
+  assert.match(res.json().error, /already posted/);
+});
+
+test("POST /api/prs/:id/findings/select-all flips every unposted finding", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
+  insertFinding(d.db, id, { engine: "codex", dimension: "tests", severity: "optional", file: "y", line: 2, side: "RIGHT", what: "w2", why: "y2", suggestedFix: "f2", anchorable: true, agreement: false });
+  const on = await app.inject({ method: "POST", url: `/api/prs/${id}/findings/select-all`, payload: { selected: true } });
+  assert.equal(on.statusCode, 200);
+  assert.ok(listFindings(d.db, id).every((f) => f.selected));
+  await app.inject({ method: "POST", url: `/api/prs/${id}/findings/select-all`, payload: { selected: false } });
+  assert.ok(listFindings(d.db, id).every((f) => !f.selected));
+});
+
+test("archive removes the worktree and clears worktree_path", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  d.exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "", stderr: "" }; };
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  updatePr(d.db, pr.id, { status: "done", worktree_path: "/data/worktrees/pr-1" });
+
+  const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/archive` });
+  assert.equal(res.statusCode, 200);
+  assert.ok(calls.some((c) => c.join(" ").includes("worktree remove --force /data/worktrees/pr-1")));
+  assert.equal(getPr(d.db, pr.id)!.worktree_path, null);
+});
+
+test("POST /api/prs/:id/retry 409s when the PR is already running", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { status: "running" });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
+  assert.equal(res.statusCode, 409);
+});
+
+test("POST /api/prs/:id/cancel marks the pr cancelled and broadcasts", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  updatePr(d.db, pr.id, { status: "running" });
+
+  const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/cancel` });
+  assert.equal(res.statusCode, 200);
+  assert.equal(getPr(d.db, pr.id)!.status, "cancelled");
+  assert.ok(received.some((m) => m.type === "pr_updated" && m.pr.id === pr.id && m.pr.status === "cancelled"));
+});
+
+test("POST /api/prs/:id/cancel 404s for a missing pr", async () => {
+  const res = await buildApp(deps()).inject({ method: "POST", url: "/api/prs/9999/cancel" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("DELETE /api/prs/:id removes the pr and broadcasts pr_deleted", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+
+  const res = await app.inject({ method: "DELETE", url: `/api/prs/${pr.id}` });
+  assert.equal(res.statusCode, 200);
+  assert.equal(getPr(d.db, pr.id), undefined);
+  assert.ok(received.some((m) => m.type === "pr_deleted" && m.prId === pr.id));
+});
+
+test("DELETE /api/prs/:id removes the worktree when one exists", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  d.exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "", stderr: "" }; };
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  updatePr(d.db, pr.id, { worktree_path: "/data/worktrees/pr-1" });
+
+  const res = await app.inject({ method: "DELETE", url: `/api/prs/${pr.id}` });
+  assert.equal(res.statusCode, 200);
+  assert.ok(calls.some((c) => c.join(" ").includes("worktree remove --force /data/worktrees/pr-1")));
+});
+
+test("DELETE /api/prs/:id 404s for a missing pr", async () => {
+  const res = await buildApp(deps()).inject({ method: "DELETE", url: "/api/prs/9999" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("POST /api/prs/:id/seen marks the pr seen and broadcasts", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+
+  const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/seen` });
+  assert.equal(res.statusCode, 200);
+  assert.ok(getPr(d.db, pr.id)!.seen_at);
+  assert.ok(received.some((m) => m.type === "pr_updated" && m.pr.id === pr.id && m.pr.seen_at));
+});
+
+test("POST /api/prs/:id/refresh-status updates CI / mergeability / review fields", async () => {
+  const d = deps();
+  d.exec = async (cmd, args) => {
+    if (cmd === "gh" && args.some((a) => a.includes("statusCheckRollup"))) {
+      return { stdout: JSON.stringify({ state: "OPEN", mergeable: "CONFLICTING", reviewDecision: "APPROVED", statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }] }), stderr: "" };
+    }
+    return { stdout: "{}", stderr: "" };
+  };
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+
+  const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/refresh-status` });
+  assert.equal(res.statusCode, 200);
+  const updated = getPr(d.db, pr.id)!;
+  assert.equal(updated.mergeable, "CONFLICTING");
+  assert.equal(updated.review_decision, "APPROVED");
+  assert.equal(updated.checks, "passing");
+});
+
+test("archive then unarchive toggles archived_at and broadcasts", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+
+  await app.inject({ method: "POST", url: `/api/prs/${pr.id}/archive` });
+  assert.ok(getPr(d.db, pr.id)!.archived_at, "archived_at should be set");
+  assert.ok(received.some((m) => m.type === "pr_updated" && m.pr.id === pr.id && m.pr.archived_at));
+
+  await app.inject({ method: "POST", url: `/api/prs/${pr.id}/unarchive` });
+  assert.equal(getPr(d.db, pr.id)!.archived_at, null);
+});
+
+test("POST /api/prs/:id/archive 404s for a missing pr", async () => {
+  const res = await buildApp(deps()).inject({ method: "POST", url: "/api/prs/9999/archive" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("purge-archived deletes only archives older than 30 days", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const stale = insertPr(d.db, { url: "https://github.com/o/r/pull/1", owner: "o", repo: "r", number: 1 });
+  const fresh = insertPr(d.db, { url: "https://github.com/o/r/pull/2", owner: "o", repo: "r", number: 2 });
+  const active = insertPr(d.db, { url: "https://github.com/o/r/pull/3", owner: "o", repo: "r", number: 3 });
+  d.db.prepare("UPDATE prs SET archived_at = datetime('now','-40 days') WHERE id = ?").run(stale.id);
+  d.db.prepare("UPDATE prs SET archived_at = datetime('now') WHERE id = ?").run(fresh.id);
+
+  const res = await app.inject({ method: "POST", url: "/api/prs/purge-archived" });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().deleted, 1);
+  assert.equal(getPr(d.db, stale.id), undefined); // old archive purged
+  assert.ok(getPr(d.db, fresh.id)); // recent archive kept
+  assert.ok(getPr(d.db, active.id)); // never-archived kept
+});
+
+test("GET /api/prs/:id/findings 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "GET", url: "/api/prs/999/findings" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("GET /api/prs/:id/findings 404s for a non-integer id", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "GET", url: "/api/prs/abc/findings" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("GET /api/prs/:id/findings returns findings once the pipeline reaches ready", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+
+  let sawFindingsUpdated = false;
+  for (let waited = 0; waited < 2000; waited += 20) {
+    sawFindingsUpdated = received.some((m) => m.type === "findings_updated" && m.prId === id);
+    if (sawFindingsUpdated) break;
+    await setTimeout(20);
+  }
+  assert.ok(sawFindingsUpdated, "timed out waiting for findings_updated broadcast");
+
+  const res = await app.inject({ method: "GET", url: `/api/prs/${id}/findings` });
+  assert.equal(res.statusCode, 200);
+  const findings = res.json();
+  assert.ok(Array.isArray(findings));
+  assert.ok(findings.length >= 1);
+});
+
+test("comments CRUD: add, list, delete; GET /api/prs/:id/diff serves the diff", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+
+  const add = await app.inject({ method: "POST", url: `/api/prs/${id}/comments`, payload: { file: "x.ts", line: 3, body: "note" } });
+  assert.equal(add.statusCode, 200);
+  const cid = add.json().id;
+
+  const list = await app.inject({ method: "GET", url: `/api/prs/${id}/comments` });
+  assert.equal(list.json().length, 1);
+  assert.equal(list.json()[0].body, "note");
+
+  const bad = await app.inject({ method: "POST", url: `/api/prs/${id}/comments`, payload: { file: "x.ts", line: 3, body: "  " } });
+  assert.equal(bad.statusCode, 400);
+
+  const del = await app.inject({ method: "DELETE", url: `/api/prs/${id}/comments/${cid}` });
+  assert.equal(del.statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: `/api/prs/${id}/comments` })).json().length, 0);
+
+  const diff = await app.inject({ method: "GET", url: `/api/prs/${id}/diff` });
+  assert.equal(diff.statusCode, 200);
+  assert.match(diff.json().diff, /diff --git/);
+});
+
+test("GET/PUT /api/settings round-trips a config patch", async () => {
+  const app = buildApp(deps());
+  const before = await app.inject({ method: "GET", url: "/api/settings" });
+  assert.equal(before.json().claudeModel, "opus");
+
+  const put = await app.inject({ method: "PUT", url: "/api/settings", payload: { claudeModel: "sonnet", robotMarker: "🤖 mine" } });
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.json().claudeModel, "sonnet");
+
+  const after = await app.inject({ method: "GET", url: "/api/settings" });
+  assert.equal(after.json().claudeModel, "sonnet");
+  assert.equal(after.json().robotMarker, "🤖 mine");
+});
+
+test("adding a PR creates a repo-config row; PUT /api/repos/:owner/:repo saves guidance", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+
+  const list = await app.inject({ method: "GET", url: "/api/repos" });
+  assert.equal(list.json().length, 1);
+  assert.equal(list.json()[0].owner, "o");
+
+  const put = await app.inject({ method: "PUT", url: "/api/repos/o/r", payload: { guidance: "treat prompt text as data" } });
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.json().guidance, "treat prompt text as data");
+
+  const got = await app.inject({ method: "GET", url: "/api/repos/o/r" });
+  assert.equal(got.json().guidance, "treat prompt text as data");
+});
+
+test("PUT /api/preface sets the default; GET returns it", async () => {
+  const app = buildApp(deps());
+  await app.inject({ method: "PUT", url: "/api/preface", payload: { preface: "LGTM-ish:" } });
+  const res = await app.inject({ method: "GET", url: "/api/preface" });
+  assert.equal(res.json().default, "LGTM-ish:");
+});
+
+test("POST /api/prs/:id/findings/:fid/select 404s for a missing finding", async () => {
+  const app = buildApp(deps());
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/findings/9999/select`, payload: { selected: true } });
+  assert.equal(res.statusCode, 404);
+});
+
+test("POST /api/prs/:id/findings/:fid/select flips selected", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const f = insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/findings/${f.id}/select`, payload: { selected: true } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(listFindings(d.db, id)[0].selected, true);
+});
+
+test("POST /api/prs/:id/findings/:fid/select 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "POST", url: "/api/prs/9999/findings/1/select", payload: { selected: true } });
+  assert.equal(res.statusCode, 404);
+});
+
+test("PUT /api/prs/:id/preface sets the pr preface", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const res = await app.inject({ method: "PUT", url: `/api/prs/${id}/preface`, payload: { preface: "mine" } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(getPr(d.db, id)!.preface, "mine");
+});
+
+test("PUT /api/prs/:id/preface 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "PUT", url: "/api/prs/9999/preface", payload: { preface: "x" } });
+  assert.equal(res.statusCode, 404);
+});
+
+test("GET /api/preface returns empty string when unset", async () => {
+  const res = await buildApp(deps()).inject({ method: "GET", url: "/api/preface" });
+  assert.equal(res.json().default, "");
+});
+
+test("POST /api/prs/:id/post posts and returns posted stage", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  // move it to ready with a selected finding (simulate pipeline output)
+  updatePr(d.db, id, { stage: "ready", status: "done" });
+  insertFinding(d.db, id, { engine: "claude", dimension: "correctness", severity: "serious", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: false, agreement: false, selected: true });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/post` });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().stage, "posted");
+});
+
+test("POST /api/prs/:id/post 500s when nothing is selected and no preface is set", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  updatePr(d.db, id, { stage: "ready", status: "done" });
+  const res = await app.inject({ method: "POST", url: `/api/prs/${id}/post` });
+  assert.equal(res.statusCode, 500);
+  assert.match(res.json().error, /nothing to post/);
+});
+
+test("POST /api/prs/:id/post 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "POST", url: "/api/prs/9999/post" });
+  assert.equal(res.statusCode, 404);
+});
+
+test("GET /api/prs/:id/runs returns per-stage runs once the pipeline reaches ready", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const received: WsMessage[] = [];
+  d.hub.add({ send: (data: string) => received.push(JSON.parse(data) as WsMessage) });
+
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+
+  let sawFindingsUpdated = false;
+  for (let waited = 0; waited < 2000; waited += 20) {
+    sawFindingsUpdated = received.some((m) => m.type === "findings_updated" && m.prId === id);
+    if (sawFindingsUpdated) break;
+    await setTimeout(20);
+  }
+  assert.ok(sawFindingsUpdated, "timed out waiting for findings_updated broadcast");
+
+  const res = await app.inject({ method: "GET", url: `/api/prs/${id}/runs` });
+  assert.equal(res.statusCode, 200);
+  const runs = res.json();
+  // Top-level stages (sub-runs like "deep_review · claude/correctness" are excluded).
+  const stages = runs.map((r: { stage: string }) => r.stage).filter((s: string) => !s.includes("·"));
+  assert.deepEqual(stages, ["prepare", "triage", "deep_review", "synthesize"]);
+  // Deep review records a per-engine sub-run so the timeline shows what ran.
+  const subRuns = runs.map((r: { stage: string }) => r.stage).filter((s: string) => s.includes("·"));
+  assert.ok(subRuns.some((s: string) => s.includes("codex/full")), "expected a codex sub-run");
+  assert.ok(subRuns.some((s: string) => s.includes("claude/")), "expected claude sub-runs");
+});
+
+test("GET /api/prs/:id/runs 404s for a missing pr", async () => {
+  const app = buildApp(deps());
+  const res = await app.inject({ method: "GET", url: "/api/prs/9999/runs" });
+  assert.equal(res.statusCode, 404);
+});
