@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type TextareaHTMLAttrib
 import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
 import { addComment, getDiff, getFileContent, getFindings, listComments, removeComment, setFindingSelected, updateComment, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
+import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
@@ -20,6 +21,14 @@ function parseGuide(json: string | null): FileGuideEntry[] {
 const SEV_DOT: Record<string, string> = { blocking: "●", serious: "●", moderate: "○", optional: "○" };
 
 const EXPAND_STEP = 20;
+
+/** One line of code, syntax-highlighted when the file's language is known. */
+function CodeText({ text, lang }: { text: string; lang: string | null }) {
+  const html = highlightLine(text, lang);
+  // highlight.js escapes its input, so its output is safe to inject.
+  if (html === null) return <>{text}</>;
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 /** Textarea that grows to fit its content (used by the finding/comment editors). */
 function AutoTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -455,6 +464,7 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                 }
               }
               const fComments = comments.filter((c) => c.file === file.path);
+              const lang = langForPath(file.path);
               return (
                 <section key={file.path} data-path={file.path} className="wt-filesection">
                   <div className="wt-diff-filehead">
@@ -479,7 +489,7 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                             <tr key={`e-${row.newNo}`} className="dl-context dl-revealed" title="context at the reviewed commit (not part of the diff — can't take comments)">
                               <td className="dl-no">{row.oldNo ?? ""}</td>
                               <td className="dl-no">{row.newNo}</td>
-                              <td className="dl-text"><span className="dl-marker"> </span>{row.text}</td>
+                              <td className="dl-text"><span className="dl-marker"> </span><CodeText text={row.text} lang={lang} /></td>
                             </tr>
                           );
                         }
@@ -498,7 +508,7 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
                               </td>
                               <td className="dl-text">
                                 <span className="dl-marker">{l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}</span>
-                                {l.text}
+                                <CodeText text={l.text} lang={lang} />
                               </td>
                             </tr>
                             {l.newNo !== null && inline.has(l.newNo) &&
