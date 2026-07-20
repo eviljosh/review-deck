@@ -397,6 +397,42 @@ a:hover { text-decoration: underline; }
   background: var(--surface);
   color: var(--text);
 }
+.post-event-compact { font-size: 12px; padding: 3px 6px; }
+.btn-active { background: var(--accent-soft); border-color: var(--accent); }
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  background: var(--green);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  font-size: 13.5px;
+  animation: toast-in 0.15s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.wt-preface {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.wt-preface label {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+}
+.wt-preface textarea {
+  min-height: 40px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 8px; font-family: var(--sans); font-size: 13px;
+  background: var(--bg); color: var(--text);
+}
 .section:last-child { margin-bottom: 0; }
 .section h3 {
   font-size: 12px;

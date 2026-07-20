@@ -6,6 +6,7 @@ import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
+import { PostControls, usePreface } from "./PostControls.tsx";
 import type { ChatStream } from "./useLivePrs.ts";
 
 function parseGuide(json: string | null): FileGuideEntry[] {
@@ -241,7 +242,7 @@ function CommentComposer({
   );
 }
 
-export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStream | undefined; onClose: () => void }) {
+export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; chat: ChatStream | undefined; onClose: () => void; onPosted?: () => void }) {
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [findings, setFindings] = useState<StoredFinding[]>([]);
@@ -391,6 +392,9 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
   }
 
   const selectedCount = findings.filter((f) => f.selected).length;
+  const unpostedComments = comments.filter((c) => !c.posted).length;
+  const [preface, setPreface, persistPreface] = usePreface(pr);
+  const [showPreface, setShowPreface] = useState(false);
 
   const [copied, setCopied] = useState(false);
   async function copyReview() {
@@ -415,9 +419,35 @@ export function Walkthrough({ pr, chat, onClose }: { pr: PrRecord; chat: ChatStr
           <button className="btn btn-sm" title="Copy the full review as markdown (for a CLI agent session)" onClick={copyReview}>
             {copied ? "Copied ✓" : "⎘ Copy review"}
           </button>
+          {(pr.stage === "ready" || posted) && (
+            <>
+              <button
+                className={`btn btn-sm ${showPreface ? "btn-active" : ""}`}
+                title="Edit the top-level review comment posted above the findings"
+                onClick={() => setShowPreface((s) => !s)}
+              >
+                Preface{preface.trim() ? " ✓" : ""}
+              </button>
+              <PostControls pr={pr} selectedCount={selectedCount} commentCount={unpostedComments} preface={preface} compact onPosted={onPosted} />
+            </>
+          )}
           <button className="btn btn-sm btn-ghost" onClick={onClose}>✕ Close (esc)</button>
         </div>
       </div>
+
+      {showPreface && (
+        <div className="wt-preface">
+          <label>Top-level review comment <span className="wt-note-hint">(leads the posted review; saved as you go)</span>
+            <AutoTextarea
+              value={preface}
+              disabled={posted}
+              placeholder="e.g. Overall this looks solid — a couple of things to address before merge."
+              onChange={(e) => setPreface(e.target.value)}
+              onBlur={persistPreface}
+            />
+          </label>
+        </div>
+      )}
 
       {diffError && <div className="error-banner">{diffError}</div>}
       {diffText === null && !diffError && <div className="empty-state">Loading diff…</div>}

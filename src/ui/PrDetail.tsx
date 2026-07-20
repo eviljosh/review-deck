@@ -1,24 +1,22 @@
 import { useEffect, useState } from "react";
-import type { FindingTheme, PrRecord, ReviewEvent, RunRecord, StoredFinding } from "../shared/types.ts";
+import type { FindingTheme, PrRecord, RunRecord, StoredFinding } from "../shared/types.ts";
 import {
   archivePr,
   cancelPr,
   deletePr,
-  getDefaultPreface,
   listComments,
   getFindings,
   getRunOutput,
   getRuns,
-  postReview,
   refreshStatus,
   retryPr,
   setAllFindingsSelected,
   setDefaultPreface,
   setFindingSelected,
-  setPrPreface,
   unarchivePr,
 } from "./api.ts";
 import { DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill } from "./bits.tsx";
+import { PostControls, usePreface } from "./PostControls.tsx";
 import { Walkthrough } from "./Walkthrough.tsx";
 import { ChatPane } from "./ChatPane.tsx";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -251,26 +249,16 @@ export function PrDetail({
     }
   }
 
-  const [preface, setPreface] = useState("");
-  useEffect(() => {
-    if (pr.preface != null) setPreface(pr.preface);
-    else getDefaultPreface().then((d) => setPreface((cur) => cur || d));
-  }, [pr.id, pr.preface]);
-
-  function postLabel(event: ReviewEvent, nFindings: number, nComments: number): string {
-    const content =
-      nFindings === 0 && nComments === 0
-        ? ""
-        : ` ${nFindings} finding${nFindings === 1 ? "" : "s"}${nComments > 0 ? ` + ${nComments} comment${nComments === 1 ? "" : "s"}` : ""}`;
-    if (event === "APPROVE") return content ? `Approve +${content}` : "Approve PR";
-    if (event === "REQUEST_CHANGES") return content ? `Request changes +${content}` : "Request changes";
-    return `Post${content} to GitHub`;
-  }
+  const [preface, setPreface, persistPreface] = usePreface(pr);
 
   const posted = pr.stage === "posted";
   const showGate = pr.stage === "ready" || posted;
-  const [posting, setPosting] = useState(false);
-  const [postEvent, setPostEvent] = useState<ReviewEvent>("COMMENT");
+  const [toast, setToast] = useState<string | null>(null);
+  function notifyPosted() {
+    setWalkthrough(false);
+    setToast("Review posted to GitHub ✓");
+    setTimeout(() => setToast(null), 4000);
+  }
   const selectedCount = findings.filter((f) => f.selected).length;
 
   const themes = parseThemes(pr.finding_themes);
@@ -296,7 +284,8 @@ export function PrDetail({
 
   return (
     <div className="detail">
-      {walkthrough && <Walkthrough pr={pr} chat={chat} onClose={() => setWalkthrough(false)} />}
+      {walkthrough && <Walkthrough pr={pr} chat={chat} onClose={() => setWalkthrough(false)} onPosted={notifyPosted} />}
+      {toast && <div className="toast">{toast}</div>}
       <div className="detail-header">
         <div className="titleblock">
           <h2>
@@ -482,7 +471,7 @@ export function PrDetail({
               className="preface-textarea"
               value={preface}
               onChange={(e) => setPreface(e.target.value)}
-              onBlur={() => setPrPreface(pr.id, preface)}
+              onBlur={persistPreface}
               disabled={posted}
             />
             {!posted && (
@@ -525,53 +514,7 @@ export function PrDetail({
 
         {showGate && (
           <div className="section post-gate">
-            <select
-              className="post-event-select"
-              value={postEvent}
-              disabled={posted || posting}
-              title="How the review lands on GitHub — comment only (default), approve, or request changes"
-              onChange={(e) => setPostEvent(e.target.value as ReviewEvent)}
-            >
-              <option value="COMMENT">Comment only</option>
-              <option value="APPROVE">Approve ✓</option>
-              <option value="REQUEST_CHANGES">Request changes ✗</option>
-            </select>
-            <button
-              className="btn btn-primary"
-              disabled={posted || posting || (postEvent !== "APPROVE" && selectedCount === 0 && commentCount === 0 && !preface.trim())}
-              title={selectedCount === 0 && commentCount === 0 && !preface.trim() && postEvent !== "APPROVE" ? "Select a finding, add a comment, or write a preface" : undefined}
-              onClick={async () => {
-                setPosting(true);
-                try {
-                  // Staleness check: if the author pushed since this review was
-                  // pinned, confirm before posting. Best-effort — a failed
-                  // status fetch never blocks posting.
-                  if (pr.head_sha) {
-                    const remote = await refreshStatus(pr.id).catch(() => null);
-                    if (remote?.headSha && remote.headSha !== pr.head_sha) {
-                      const ok = confirm(
-                        `The author pushed new commits since this review ` +
-                        `(reviewed ${pr.head_sha.slice(0, 8)}, head is now ${remote.headSha.slice(0, 8)}).\n\n` +
-                        `Comments will still anchor to the reviewed commit — lines that changed since ` +
-                        `will show as "outdated" on GitHub.\n\n` +
-                        `Post anyway? (Cancel to keep editing; use ↻ Retry to re-review the new head.)`,
-                      );
-                      if (!ok) return;
-                    }
-                  }
-                  const r = await postReview(pr.id, postEvent);
-                  if (!r.ok) alert(r.error);
-                } finally {
-                  setPosting(false);
-                }
-              }}
-            >
-              {posted
-                ? "Posted ✓"
-                : posting
-                  ? "Posting…"
-                  : postLabel(postEvent, selectedCount, commentCount)}
-            </button>
+            <PostControls pr={pr} selectedCount={selectedCount} commentCount={commentCount} preface={preface} onPosted={notifyPosted} />
           </div>
         )}
 
