@@ -370,15 +370,20 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
     setConvo((v) => ({ ...v, overall: [...v.overall, c] }));
   }
 
-  // Capture-phase Escape: close the walkthrough without letting the app-level
-  // handler also close the whole detail view.
+  // The Discussion panel: PR-level comments plus threads with no diff anchor.
+  const [discussionOpen, setDiscussionOpen] = useState(false);
+
+  // Capture-phase Escape: close the discussion panel if open, else the
+  // walkthrough — without letting the app-level handler also close the whole
+  // detail view.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        if (discussionOpen) setDiscussionOpen(false);
+        else onClose();
       }
     }
     window.addEventListener("keydown", onKey, true);
@@ -426,19 +431,15 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   const posted = pr.stage === "posted";
   const fileFindings = current ? findingsByFile.get(current.path) ?? [] : [];
   const fileComments = current ? comments.filter((c) => c.file === current.path) : [];
-  // Threads on the current file that can't anchor to a rendered diff row —
-  // outdated (line=null) or pointing at a line our pinned diff doesn't have.
-  const unanchoredThreads = current
-    ? convo.threads.filter(
-        (t) =>
-          t.path === current.path &&
-          (t.line === null ||
-            !current.lines.some((l) => (t.side === "LEFT" ? l.oldNo === t.line : l.newNo === t.line))),
-      )
-    : [];
-  // Threads on paths that aren't in this diff at all — surfaced with the
-  // PR-level discussion so they don't vanish.
-  const orphanThreads = convo.threads.filter((t) => !files.some((f) => f.path === t.path));
+  // Threads that can't anchor to any rendered diff row — outdated (line=null),
+  // pointing at a line our pinned diff doesn't have, or on a file outside the
+  // diff. These surface in the Discussion panel instead of inline.
+  const unanchoredThreads = convo.threads.filter((t) => {
+    if (t.line === null) return true;
+    const f = files.find((x) => x.path === t.path);
+    return !f || !f.lines.some((l) => (t.side === "LEFT" ? l.oldNo === t.line : l.newNo === t.line));
+  });
+  const discussionCount = convo.overall.length + unanchoredThreads.length;
 
   const toggleFinding = (f: StoredFinding, checked: boolean) => {
     setFindingSelected(pr.id, f.id, checked).catch(() => {});
@@ -531,6 +532,13 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
           <span className="wt-selcount">{selectedCount} finding{selectedCount === 1 ? "" : "s"} selected</span>
         </div>
         <div className="wt-header-right">
+          <button
+            className={`btn btn-sm ${discussionOpen ? "btn-active" : ""}`}
+            title="PR-level comments, review verdicts, and threads without a diff line"
+            onClick={() => setDiscussionOpen((s) => !s)}
+          >
+            💬 Discussion{discussionCount > 0 ? ` (${discussionCount})` : ""}
+          </button>
           <button className="btn btn-sm" title="Re-fetch comments and threads from GitHub" onClick={loadConvo} disabled={convoLoading}>
             {convoLoading ? "↻ Refreshing…" : "↻ Comments"}
           </button>
@@ -564,6 +572,61 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
               onBlur={persistPreface}
             />
           </label>
+        </div>
+      )}
+
+      {discussionOpen && (
+        <div className="wt-discussion">
+          <div className="wt-discussion-head">
+            <h4>PR discussion</h4>
+            <button className="btn btn-sm btn-ghost" onClick={() => setDiscussionOpen(false)}>✕</button>
+          </div>
+          <div className="wt-discussion-body">
+            {discussionCount === 0 && <div className="wt-quiet">No PR-level comments yet.</div>}
+            {convo.overall.map((c, i) => (
+              <div key={`${c.id}-${i}`} className="wt-thread-comment">
+                <span className="wt-thread-author">
+                  {c.author}
+                  {c.state && <span className={`wt-review-state wt-review-${c.state.toLowerCase()}`}> {c.state.toLowerCase().replace("_", " ")}</span>}
+                </span>
+                <Md>{c.body}</Md>
+              </div>
+            ))}
+            {unanchoredThreads.length > 0 && (
+              <>
+                <div className="wt-discussion-divider">Threads without a current diff line</div>
+                {unanchoredThreads.map((t) => (
+                  <div key={t.rootId}>
+                    <span className="wt-mini-line">{t.path}:{t.originalLine ?? "?"}</span>
+                    <ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} />
+                  </div>
+                ))}
+              </>
+            )}
+            {prCommentOpen ? (
+              <div className="wt-composer">
+                <AutoTextarea
+                  autoFocus
+                  value={prComment}
+                  placeholder="Comment on the PR…"
+                  onChange={(e) => setPrComment(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && prComment.trim() && !prSending) sendPrComment();
+                    if (e.key === "Escape") { e.stopPropagation(); setPrCommentOpen(false); }
+                  }}
+                />
+                <div className="wt-composer-actions">
+                  <button className="btn btn-sm btn-primary" disabled={prSending || !prComment.trim()} onClick={sendPrComment}>
+                    {prSending ? "Posting…" : "Comment"}
+                  </button>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setPrCommentOpen(false)}>Cancel</button>
+                  <span className="hint">posts to GitHub immediately</span>
+                </div>
+              </div>
+            ) : (
+              <button className="btn btn-sm" onClick={() => setPrCommentOpen(true)}>＋ Comment on PR</button>
+            )}
+          </div>
         </div>
       )}
 
@@ -775,62 +838,6 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                   <span className="wt-mini-line">{c.line !== null ? `:${c.line}` : "(file)"}</span> <Md inline>{c.body}</Md>
                 </div>
               ))}
-            </div>
-            {unanchoredThreads.length > 0 && (
-              <div className="wt-section">
-                <h4>Threads not in this diff ({unanchoredThreads.length})</h4>
-                <div className="wt-quiet">On lines that changed since (or fall outside) the reviewed diff.</div>
-                {unanchoredThreads.map((t) => (
-                  <div key={t.rootId}>
-                    <span className="wt-mini-line">:{t.originalLine ?? "?"}</span>
-                    <ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} />
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="wt-section">
-              <h4>PR discussion ({convo.overall.length})</h4>
-              {convo.overall.length === 0 && orphanThreads.length === 0 && (
-                <div className="wt-quiet">No PR-level comments yet.</div>
-              )}
-              {convo.overall.map((c, i) => (
-                <div key={`${c.id}-${i}`} className="wt-thread-comment">
-                  <span className="wt-thread-author">
-                    {c.author}
-                    {c.state && <span className={`wt-review-state wt-review-${c.state.toLowerCase()}`}> {c.state.toLowerCase().replace("_", " ")}</span>}
-                  </span>
-                  <Md>{c.body}</Md>
-                </div>
-              ))}
-              {orphanThreads.map((t) => (
-                <div key={t.rootId}>
-                  <span className="wt-mini-line">{t.path}:{t.originalLine ?? "?"}</span>
-                  <ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} />
-                </div>
-              ))}
-              {prCommentOpen ? (
-                <div className="wt-composer">
-                  <AutoTextarea
-                    autoFocus
-                    value={prComment}
-                    placeholder="Comment on the PR…"
-                    onChange={(e) => setPrComment(e.target.value)}
-                    onKeyDown={(e) => {
-                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && prComment.trim() && !prSending) sendPrComment();
-                      if (e.key === "Escape") { e.stopPropagation(); setPrCommentOpen(false); }
-                    }}
-                  />
-                  <div className="wt-composer-actions">
-                    <button className="btn btn-sm btn-primary" disabled={prSending || !prComment.trim()} onClick={sendPrComment}>
-                      {prSending ? "Posting…" : "Comment"}
-                    </button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => setPrCommentOpen(false)}>Cancel</button>
-                    <span className="hint">posts to GitHub immediately</span>
-                  </div>
-                </div>
-              ) : (
-                <button className="btn btn-sm" onClick={() => setPrCommentOpen(true)}>＋ Comment on PR</button>
-              )}
             </div>
           </div>
         </div>
