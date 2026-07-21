@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Exec } from "./exec.ts";
-import type { ReviewEvent } from "../shared/types.ts";
+import type { GhComment, GhConversation, GhInlineThread, GhOverallComment, ReviewEvent } from "../shared/types.ts";
 import { isBotAuthored } from "./post-review.ts";
 
 export type PrMeta = {
@@ -107,6 +107,140 @@ export async function fetchPrDiscussion(
   const CAP = 8000; // bound the prompt; long threads get truncated
   if (out.length > CAP) out = out.slice(0, CAP) + "\n\n…(older activity truncated)";
   return out;
+}
+
+// The PR's existing conversation as structured data (the text-transcript
+// variant above feeds triage; this one feeds the walkthrough UI). Inline
+// review comments are grouped into threads by their reply chain; issue
+// comments and review submissions land in `overall`. Best-effort: any gh or
+// parse error yields an empty conversation.
+export async function fetchPrConversation(
+  exec: Exec,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<GhConversation> {
+  const threads: GhInlineThread[] = [];
+  const overall: GhOverallComment[] = [];
+
+  try {
+    const { stdout } = await exec("gh", [
+      "api", `repos/${owner}/${repo}/pulls/${number}/comments`, "--paginate",
+    ]);
+    const arr = JSON.parse(stdout) as {
+      id: number; user?: { login?: string }; body?: string; path?: string;
+      line?: number | null; original_line?: number | null; side?: string | null;
+      in_reply_to_id?: number; created_at?: string;
+    }[];
+    if (Array.isArray(arr)) {
+      const byId = new Map(arr.map((c) => [c.id, c]));
+      const rootOf = (c: (typeof arr)[number]): number => {
+        let cur = c;
+        // Follow the reply chain to the thread root (GitHub normally points
+        // replies straight at the root; the loop covers older nested data).
+        for (let hops = 0; cur.in_reply_to_id && byId.has(cur.in_reply_to_id) && hops < 50; hops++) {
+          cur = byId.get(cur.in_reply_to_id)!;
+        }
+        return cur.id;
+      };
+      const grouped = new Map<number, (typeof arr)[number][]>();
+      for (const c of arr) {
+        const root = rootOf(c);
+        if (!grouped.has(root)) grouped.set(root, []);
+        grouped.get(root)!.push(c);
+      }
+      for (const [rootId, cs] of grouped) {
+        cs.sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+        const root = byId.get(rootId) ?? cs[0];
+        const comments: GhComment[] = cs
+          .filter((c) => (c.body ?? "").trim())
+          .map((c) => ({
+            id: c.id,
+            author: c.user?.login ?? "unknown",
+            body: (c.body ?? "").trim(),
+            createdAt: c.created_at ?? "",
+            bot: isBotAuthored(c.body ?? ""),
+          }));
+        // A thread that is only this tool's own posted findings duplicates the
+        // finding cards — skip it. Any human participation keeps the thread.
+        if (comments.length === 0 || comments.every((c) => c.bot)) continue;
+        threads.push({
+          rootId,
+          path: root.path ?? "",
+          line: root.line ?? null,
+          side: root.side === "LEFT" ? "LEFT" : "RIGHT",
+          originalLine: root.original_line ?? root.line ?? null,
+          comments,
+        });
+      }
+    }
+  } catch {
+    // no inline comments available — fine
+  }
+
+  try {
+    const { stdout } = await exec("gh", [
+      "pr", "view", String(number), "--repo", `${owner}/${repo}`, "--json", "reviews,comments",
+    ]);
+    const j = JSON.parse(stdout) as {
+      reviews?: { id?: number; author?: { login?: string }; body?: string; state?: string; submittedAt?: string }[];
+      comments?: { id?: number; author?: { login?: string }; body?: string; createdAt?: string }[];
+    };
+    for (const r of j.reviews ?? []) {
+      const body = (r.body ?? "").trim();
+      // Same rule as the triage transcript: keep decisions and bodies, skip
+      // empty COMMENTED shells and this tool's own posted reviews.
+      if (!body && (!r.state || r.state === "COMMENTED")) continue;
+      if (isBotAuthored(body)) continue;
+      overall.push({
+        id: r.id ?? 0,
+        author: r.author?.login ?? "unknown",
+        body,
+        createdAt: r.submittedAt ?? "",
+        bot: false,
+        ...(r.state && r.state !== "COMMENTED" ? { state: r.state } : {}),
+      });
+    }
+    for (const c of j.comments ?? []) {
+      const body = (c.body ?? "").trim();
+      if (!body || isBotAuthored(body)) continue;
+      overall.push({ id: c.id ?? 0, author: c.author?.login ?? "unknown", body, createdAt: c.createdAt ?? "", bot: false });
+    }
+    overall.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  } catch {
+    // no reviews/comments available — fine
+  }
+
+  return { threads, overall };
+}
+
+/** Immediate threaded reply to an inline review comment (not batched with a review). */
+export async function replyToReviewComment(
+  exec: Exec,
+  owner: string,
+  repo: string,
+  number: number,
+  commentId: number,
+  body: string,
+): Promise<void> {
+  await exec("gh", [
+    "api", `repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies`,
+    "--method", "POST", "-f", `body=${body}`,
+  ]);
+}
+
+/** Immediate PR-level (issue) comment. */
+export async function postIssueComment(
+  exec: Exec,
+  owner: string,
+  repo: string,
+  number: number,
+  body: string,
+): Promise<void> {
+  await exec("gh", [
+    "api", `repos/${owner}/${repo}/issues/${number}/comments`,
+    "--method", "POST", "-f", `body=${body}`,
+  ]);
 }
 
 export type PrStatus = {

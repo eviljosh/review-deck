@@ -186,3 +186,91 @@ test("postPrReview calls gh reviews API with --input and event COMMENT", async (
   const written = JSON.parse(await import("node:fs/promises").then((fs) => fs.readFile(file, "utf8")));
   assert.equal(written.event, "COMMENT");
 });
+
+// ---------- fetchPrConversation ----------
+
+import { fetchPrConversation, replyToReviewComment, postIssueComment } from "../src/server/gh.ts";
+import { BOT_SENTINEL } from "../src/server/post-review.ts";
+
+function convoExec(inline: unknown[], view: unknown): Exec {
+  return async (cmd, args) => {
+    if (args.includes("--paginate")) return { stdout: JSON.stringify(inline), stderr: "" };
+    return { stdout: JSON.stringify(view), stderr: "" };
+  };
+}
+
+test("fetchPrConversation groups inline replies into one thread at the root's anchor", async () => {
+  const exec = convoExec(
+    [
+      { id: 1, user: { login: "alice" }, body: "root question", path: "a.ts", line: 12, side: "RIGHT", created_at: "2026-01-01" },
+      { id: 2, user: { login: "bob" }, body: "reply", path: "a.ts", line: 12, side: "RIGHT", in_reply_to_id: 1, created_at: "2026-01-02" },
+    ],
+    { reviews: [], comments: [] },
+  );
+  const c = await fetchPrConversation(exec, "o", "r", 5);
+  assert.equal(c.threads.length, 1);
+  assert.equal(c.threads[0].rootId, 1);
+  assert.equal(c.threads[0].path, "a.ts");
+  assert.equal(c.threads[0].line, 12);
+  assert.deepEqual(c.threads[0].comments.map((x) => x.author), ["alice", "bob"]);
+});
+
+test("fetchPrConversation drops threads that are only this tool's own comments, keeps ones with human replies", async () => {
+  const exec = convoExec(
+    [
+      { id: 1, user: { login: "app" }, body: `bot finding ${BOT_SENTINEL}`, path: "a.ts", line: 3, side: "RIGHT", created_at: "2026-01-01" },
+      { id: 2, user: { login: "app" }, body: `other bot finding ${BOT_SENTINEL}`, path: "b.ts", line: 8, side: "RIGHT", created_at: "2026-01-01" },
+      { id: 3, user: { login: "author" }, body: "actually this is intended", path: "b.ts", line: 8, side: "RIGHT", in_reply_to_id: 2, created_at: "2026-01-02" },
+    ],
+    { reviews: [], comments: [] },
+  );
+  const c = await fetchPrConversation(exec, "o", "r", 5);
+  assert.equal(c.threads.length, 1);
+  assert.equal(c.threads[0].rootId, 2);
+  assert.equal(c.threads[0].comments[0].bot, true);
+  assert.equal(c.threads[0].comments[1].bot, false);
+});
+
+test("fetchPrConversation marks outdated comments with null line and keeps original_line", async () => {
+  const exec = convoExec(
+    [{ id: 1, user: { login: "alice" }, body: "old note", path: "a.ts", line: null, original_line: 40, side: "LEFT", created_at: "2026-01-01" }],
+    { reviews: [], comments: [] },
+  );
+  const c = await fetchPrConversation(exec, "o", "r", 5);
+  assert.equal(c.threads[0].line, null);
+  assert.equal(c.threads[0].originalLine, 40);
+  assert.equal(c.threads[0].side, "LEFT");
+});
+
+test("fetchPrConversation collects review decisions and issue comments, filtering bot reviews", async () => {
+  const exec = convoExec(
+    [],
+    {
+      reviews: [
+        { id: 10, author: { login: "carol" }, body: "ship it", state: "APPROVED", submittedAt: "2026-01-02" },
+        { id: 11, author: { login: "app" }, body: `posted review ${BOT_SENTINEL}`, state: "COMMENTED", submittedAt: "2026-01-03" },
+        { id: 12, author: { login: "dan" }, body: "", state: "COMMENTED", submittedAt: "2026-01-04" },
+      ],
+      comments: [{ id: 20, author: { login: "erin" }, body: "when does this land?", createdAt: "2026-01-01" }],
+    },
+  );
+  const c = await fetchPrConversation(exec, "o", "r", 5);
+  assert.deepEqual(c.overall.map((x) => x.author), ["erin", "carol"]); // chronological
+  assert.equal(c.overall[1].state, "APPROVED");
+});
+
+test("fetchPrConversation degrades to an empty conversation on gh errors", async () => {
+  const c = await fetchPrConversation(async () => { throw new Error("boom"); }, "o", "r", 5);
+  assert.deepEqual(c, { threads: [], overall: [] });
+});
+
+test("replyToReviewComment and postIssueComment hit the right endpoints", async () => {
+  const calls: string[][] = [];
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "{}", stderr: "" }; };
+  await replyToReviewComment(exec, "o", "r", 5, 42, "sounds good");
+  await postIssueComment(exec, "o", "r", 5, "overall note");
+  assert.ok(calls[0].includes("repos/o/r/pulls/5/comments/42/replies"));
+  assert.ok(calls[0].includes("body=sounds good"));
+  assert.ok(calls[1].includes("repos/o/r/issues/5/comments"));
+  assert.ok(calls[1].includes("body=overall note"));
+});

@@ -12,7 +12,7 @@ import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetti
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
-import { fetchPrStatus } from "./gh.ts";
+import { fetchPrConversation, fetchPrStatus, postIssueComment, replyToReviewComment } from "./gh.ts";
 import { parsePrUrl } from "./parse-url.ts";
 import { runPipeline } from "./pipeline.ts";
 import { runPost } from "./post-stage.ts";
@@ -295,6 +295,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  // The PR's existing GitHub conversation — inline review-comment threads plus
+  // PR-level comments/review bodies — for display in the walkthrough.
+  app.get<{ Params: { id: string } }>("/api/prs/:id/conversation", async (req, reply) => {
+    const id = Number(req.params.id);
+    const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+    if (!pr) return reply.code(404).send({ error: "pr not found" });
+    return fetchPrConversation(exec, pr.owner, pr.repo, pr.number);
+  });
+
+  // Reply into the conversation. Unlike review findings/comments (batched until
+  // Post), these go to GitHub immediately: a threaded reply when inReplyTo is
+  // given, otherwise a new PR-level comment.
+  app.post<{ Params: { id: string }; Body: { body?: string; inReplyTo?: number } }>(
+    "/api/prs/:id/conversation/reply",
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+      if (!pr) return reply.code(404).send({ error: "pr not found" });
+      const body = (req.body?.body ?? "").trim();
+      if (!body) return reply.code(400).send({ error: "reply body is required" });
+      const inReplyTo = req.body?.inReplyTo;
+      if (inReplyTo !== undefined && !Number.isInteger(inReplyTo)) {
+        return reply.code(400).send({ error: "inReplyTo must be a comment id" });
+      }
+      try {
+        if (inReplyTo !== undefined) await replyToReviewComment(exec, pr.owner, pr.repo, pr.number, inReplyTo, body);
+        else await postIssueComment(exec, pr.owner, pr.repo, pr.number, body);
+        return { ok: true };
+      } catch (err) {
+        return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
 
   // Reviewer comments: anchored to diff lines in the walkthrough, merged into
   // the posted review alongside the selected findings.

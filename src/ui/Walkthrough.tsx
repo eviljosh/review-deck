@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type TextareaHTMLAttributes } from "react";
-import type { FileGuideEntry, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
-import { addComment, getDiff, getFileContent, getFindings, listComments, removeComment, setFindingSelected, updateComment, updateFinding } from "./api.ts";
+import type { FileGuideEntry, GhConversation, GhInlineThread, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import { addComment, getConversation, getDiff, getFileContent, getFindings, listComments, removeComment, replyToConversation, setFindingSelected, updateComment, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -211,6 +211,72 @@ function FindingCard({
   );
 }
 
+/**
+ * An existing GitHub review-comment thread. Replies go to GitHub immediately
+ * (they are not batched with the pending review, matching GitHub's own flow).
+ */
+function ThreadCard({
+  thread,
+  prId,
+  onReplied,
+}: {
+  thread: GhInlineThread;
+  prId: number;
+  onReplied: (rootId: number, body: string) => void;
+}) {
+  const [replying, setReplying] = useState(false);
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    setSending(true);
+    try {
+      await replyToConversation(prId, body.trim(), thread.rootId);
+      onReplied(thread.rootId, body.trim());
+      setBody("");
+      setReplying(false);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="wt-thread">
+      {thread.comments.map((c) => (
+        <div key={c.id} className="wt-thread-comment">
+          <span className="wt-thread-author">{c.bot ? "🤖 " : ""}{c.author}</span>
+          <Md>{c.body}</Md>
+        </div>
+      ))}
+      {replying ? (
+        <div className="wt-composer">
+          <AutoTextarea
+            autoFocus
+            value={body}
+            placeholder="Reply on GitHub…"
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && body.trim() && !sending) send();
+              if (e.key === "Escape") { e.stopPropagation(); setReplying(false); }
+            }}
+          />
+          <div className="wt-composer-actions">
+            <button className="btn btn-sm btn-primary" disabled={sending || !body.trim()} onClick={send}>
+              {sending ? "Replying…" : "Reply"}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => setReplying(false)}>Cancel</button>
+            <span className="hint">posts to GitHub immediately</span>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-sm btn-ghost wt-thread-reply" onClick={() => setReplying(true)}>↩ Reply</button>
+      )}
+    </div>
+  );
+}
+
 function CommentComposer({
   onSubmit,
   onCancel,
@@ -286,6 +352,24 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
     listComments(pr.id).then(setComments).catch(() => {});
   }, [pr.id]);
 
+  // The PR's existing GitHub conversation — fetched live on open, refreshable.
+  const [convo, setConvo] = useState<GhConversation>({ threads: [], overall: [] });
+  const [convoLoading, setConvoLoading] = useState(false);
+  const loadConvo = () => {
+    setConvoLoading(true);
+    getConversation(pr.id).then(setConvo).catch(() => {}).finally(() => setConvoLoading(false));
+  };
+  useEffect(loadConvo, [pr.id]);
+
+  function appendThreadReply(rootId: number, body: string) {
+    const c = { id: -Date.now(), author: "you", body, createdAt: new Date().toISOString(), bot: false };
+    setConvo((v) => ({ ...v, threads: v.threads.map((t) => (t.rootId === rootId ? { ...t, comments: [...t.comments, c] } : t)) }));
+  }
+  function appendOverall(body: string) {
+    const c = { id: -Date.now(), author: "you", body, createdAt: new Date().toISOString(), bot: false };
+    setConvo((v) => ({ ...v, overall: [...v.overall, c] }));
+  }
+
   // Capture-phase Escape: close the walkthrough without letting the app-level
   // handler also close the whole detail view.
   useEffect(() => {
@@ -342,6 +426,19 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   const posted = pr.stage === "posted";
   const fileFindings = current ? findingsByFile.get(current.path) ?? [] : [];
   const fileComments = current ? comments.filter((c) => c.file === current.path) : [];
+  // Threads on the current file that can't anchor to a rendered diff row —
+  // outdated (line=null) or pointing at a line our pinned diff doesn't have.
+  const unanchoredThreads = current
+    ? convo.threads.filter(
+        (t) =>
+          t.path === current.path &&
+          (t.line === null ||
+            !current.lines.some((l) => (t.side === "LEFT" ? l.oldNo === t.line : l.newNo === t.line))),
+      )
+    : [];
+  // Threads on paths that aren't in this diff at all — surfaced with the
+  // PR-level discussion so they don't vanish.
+  const orphanThreads = convo.threads.filter((t) => !files.some((f) => f.path === t.path));
 
   const toggleFinding = (f: StoredFinding, checked: boolean) => {
     setFindingSelected(pr.id, f.id, checked).catch(() => {});
@@ -396,6 +493,24 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   const [preface, setPreface, persistPreface] = usePreface(pr);
   const [showPreface, setShowPreface] = useState(false);
 
+  // PR-level comment composer (posts to GitHub immediately, like a thread reply).
+  const [prCommentOpen, setPrCommentOpen] = useState(false);
+  const [prComment, setPrComment] = useState("");
+  const [prSending, setPrSending] = useState(false);
+  async function sendPrComment() {
+    setPrSending(true);
+    try {
+      await replyToConversation(pr.id, prComment.trim());
+      appendOverall(prComment.trim());
+      setPrComment("");
+      setPrCommentOpen(false);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setPrSending(false);
+    }
+  }
+
   const [copied, setCopied] = useState(false);
   async function copyReview() {
     try {
@@ -416,6 +531,9 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
           <span className="wt-selcount">{selectedCount} finding{selectedCount === 1 ? "" : "s"} selected</span>
         </div>
         <div className="wt-header-right">
+          <button className="btn btn-sm" title="Re-fetch comments and threads from GitHub" onClick={loadConvo} disabled={convoLoading}>
+            {convoLoading ? "↻ Refreshing…" : "↻ Comments"}
+          </button>
           <button className="btn btn-sm" title="Copy the full review as markdown (for a CLI agent session)" onClick={copyReview}>
             {copied ? "Copied ✓" : "⎘ Copy review"}
           </button>
@@ -497,6 +615,16 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                 }
               }
               const fComments = comments.filter((c) => c.file === file.path);
+              // Existing GitHub threads anchored by (side, line) — RIGHT lines
+              // match newNo, LEFT lines match oldNo.
+              const rThreads = new Map<number, GhInlineThread[]>();
+              const lThreads = new Map<number, GhInlineThread[]>();
+              for (const t of convo.threads) {
+                if (t.path !== file.path || t.line === null) continue;
+                const m = t.side === "LEFT" ? lThreads : rThreads;
+                if (!m.has(t.line)) m.set(t.line, []);
+                m.get(t.line)!.push(t);
+              }
               const lang = langForPath(file.path);
               return (
                 <section key={file.path} data-path={file.path} className="wt-filesection">
@@ -548,6 +676,18 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                               inline.get(l.newNo)!.map((f) => (
                                 <tr key={`f-${f.id}`} className="dl-widget">
                                   <td colSpan={3}><FindingCard f={f} posted={posted} onToggle={toggleFinding} onSave={saveFinding} /></td>
+                                </tr>
+                              ))}
+                            {l.newNo !== null && rThreads.has(l.newNo) &&
+                              rThreads.get(l.newNo)!.map((t) => (
+                                <tr key={`t-${t.rootId}`} className="dl-widget">
+                                  <td colSpan={3}><ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} /></td>
+                                </tr>
+                              ))}
+                            {l.oldNo !== null && lThreads.has(l.oldNo) &&
+                              lThreads.get(l.oldNo)!.map((t) => (
+                                <tr key={`t-${t.rootId}`} className="dl-widget">
+                                  <td colSpan={3}><ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} /></td>
                                 </tr>
                               ))}
                             {l.newNo !== null && fComments.filter((c) => c.line === l.newNo).map((c) => (
@@ -635,6 +775,62 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                   <span className="wt-mini-line">{c.line !== null ? `:${c.line}` : "(file)"}</span> <Md inline>{c.body}</Md>
                 </div>
               ))}
+            </div>
+            {unanchoredThreads.length > 0 && (
+              <div className="wt-section">
+                <h4>Threads not in this diff ({unanchoredThreads.length})</h4>
+                <div className="wt-quiet">On lines that changed since (or fall outside) the reviewed diff.</div>
+                {unanchoredThreads.map((t) => (
+                  <div key={t.rootId}>
+                    <span className="wt-mini-line">:{t.originalLine ?? "?"}</span>
+                    <ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} />
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="wt-section">
+              <h4>PR discussion ({convo.overall.length})</h4>
+              {convo.overall.length === 0 && orphanThreads.length === 0 && (
+                <div className="wt-quiet">No PR-level comments yet.</div>
+              )}
+              {convo.overall.map((c, i) => (
+                <div key={`${c.id}-${i}`} className="wt-thread-comment">
+                  <span className="wt-thread-author">
+                    {c.author}
+                    {c.state && <span className={`wt-review-state wt-review-${c.state.toLowerCase()}`}> {c.state.toLowerCase().replace("_", " ")}</span>}
+                  </span>
+                  <Md>{c.body}</Md>
+                </div>
+              ))}
+              {orphanThreads.map((t) => (
+                <div key={t.rootId}>
+                  <span className="wt-mini-line">{t.path}:{t.originalLine ?? "?"}</span>
+                  <ThreadCard thread={t} prId={pr.id} onReplied={appendThreadReply} />
+                </div>
+              ))}
+              {prCommentOpen ? (
+                <div className="wt-composer">
+                  <AutoTextarea
+                    autoFocus
+                    value={prComment}
+                    placeholder="Comment on the PR…"
+                    onChange={(e) => setPrComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && prComment.trim() && !prSending) sendPrComment();
+                      if (e.key === "Escape") { e.stopPropagation(); setPrCommentOpen(false); }
+                    }}
+                  />
+                  <div className="wt-composer-actions">
+                    <button className="btn btn-sm btn-primary" disabled={prSending || !prComment.trim()} onClick={sendPrComment}>
+                      {prSending ? "Posting…" : "Comment"}
+                    </button>
+                    <button className="btn btn-sm btn-ghost" onClick={() => setPrCommentOpen(false)}>Cancel</button>
+                    <span className="hint">posts to GitHub immediately</span>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn btn-sm" onClick={() => setPrCommentOpen(true)}>＋ Comment on PR</button>
+              )}
             </div>
           </div>
         </div>

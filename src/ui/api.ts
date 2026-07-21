@@ -1,4 +1,4 @@
-import type { ChatMessage, PrRecord, ReviewEvent, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import type { ChatMessage, GhConversation, PrRecord, ReviewEvent, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
 
 export interface DimensionDef { key: string; guidance: string }
 export interface RiskFlagDef { key: string; description: string }
@@ -125,6 +125,17 @@ export async function postReview(id: number, event: ReviewEvent = "COMMENT"): Pr
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event }),
   });
   return res.json();
+}
+export async function getConversation(id: number): Promise<GhConversation> {
+  const res = await fetch(`/api/prs/${id}/conversation`);
+  if (!res.ok) return { threads: [], overall: [] };
+  return res.json();
+}
+export async function replyToConversation(id: number, body: string, inReplyTo?: number): Promise<void> {
+  const res = await fetch(`/api/prs/${id}/conversation/reply`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body, inReplyTo }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? `reply failed: ${res.status}`);
 }
 export async function getRuns(id: number): Promise<RunRecord[]> {
   const res = await fetch(`/api/prs/${id}/runs`);

@@ -874,6 +874,22 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 }
 .wt-selcount { margin-left: 12px; color: var(--text-muted); font-size: 12px; }
 
+/* Existing GitHub review-comment threads — visually distinct from findings
+   (neutral border, no severity edge) so "already discussed" reads at a glance. */
+.wt-thread {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px; margin: 2px 0;
+  font-family: var(--sans); font-size: 13px;
+}
+.wt-thread-comment { margin-bottom: 6px; }
+.wt-thread-comment:last-child { margin-bottom: 0; }
+.wt-thread-comment p { margin: 2px 0; }
+.wt-thread-author { display: block; font-weight: 600; font-size: 12px; color: var(--text-muted); }
+.wt-thread-reply { margin-top: 2px; }
+.wt-review-state { font-weight: 600; text-transform: none; }
+.wt-review-approved { color: var(--green); }
+.wt-review-changes_requested { color: var(--red); }
+
 .wt-finding-off { opacity: 0.55; }
 .wt-reviewer-note {
   background: var(--accent-soft);

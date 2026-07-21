@@ -56,6 +56,39 @@ export interface FileGuideEntry {
 /** GitHub review verdict. COMMENT is the default; the others gate the merge. */
 export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
+/** One comment fetched from the PR's existing GitHub conversation. */
+export interface GhComment {
+  id: number;
+  author: string;
+  body: string;
+  createdAt: string;
+  /** Authored by this tool (recognized via the bot sentinel). */
+  bot: boolean;
+}
+
+/** An inline review-comment thread, anchored to a diff position when possible. */
+export interface GhInlineThread {
+  rootId: number;
+  path: string;
+  /** Line in the diff against the current head; null when the code has since changed. */
+  line: number | null;
+  side: "LEFT" | "RIGHT";
+  /** Best-known line for display when `line` is null (the original anchor). */
+  originalLine: number | null;
+  comments: GhComment[];
+}
+
+/** PR-level conversation item: an issue comment or a review body. */
+export interface GhOverallComment extends GhComment {
+  /** APPROVED / CHANGES_REQUESTED for review submissions; absent for plain comments. */
+  state?: string;
+}
+
+export interface GhConversation {
+  threads: GhInlineThread[];
+  overall: GhOverallComment[];
+}
+
 export interface UserComment {
   id: number;
   pr_id: number;

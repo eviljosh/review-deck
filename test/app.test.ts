@@ -642,6 +642,44 @@ test("POST /api/prs/:id/post accepts event=APPROVE with nothing selected", async
   assert.equal(res.json().stage, "posted");
 });
 
+test("GET /api/prs/:id/conversation returns structured threads from gh", async () => {
+  const d = deps();
+  d.exec = async (cmd: string, args: string[]) => {
+    if (args.includes("--paginate")) {
+      return { stdout: JSON.stringify([{ id: 1, user: { login: "alice" }, body: "hm", path: "x.ts", line: 2, side: "RIGHT", created_at: "2026-01-01" }]), stderr: "" };
+    }
+    if (args.includes("reviews,comments")) return { stdout: JSON.stringify({ reviews: [], comments: [] }), stderr: "" };
+    return { stdout: JSON.stringify({ title: "T", author: { login: "u" }, additions: 1, deletions: 0, changedFiles: 1 }), stderr: "" };
+  };
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  const res = await app.inject({ method: "GET", url: `/api/prs/${id}/conversation` });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().threads.length, 1);
+  assert.equal(res.json().threads[0].comments[0].author, "alice");
+});
+
+test("POST /api/prs/:id/conversation/reply routes to the replies endpoint (or issue comments without inReplyTo)", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  d.exec = async (cmd: string, args: string[]) => { calls.push(args); return { stdout: JSON.stringify({ title: "T", author: { login: "u" }, additions: 1, deletions: 0, changedFiles: 1 }), stderr: "" }; };
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+
+  const threaded = await app.inject({ method: "POST", url: `/api/prs/${id}/conversation/reply`, payload: { body: "agreed", inReplyTo: 7 } });
+  assert.equal(threaded.statusCode, 200);
+  assert.ok(calls.some((a) => a.includes("repos/o/r/pulls/5/comments/7/replies")));
+
+  const plain = await app.inject({ method: "POST", url: `/api/prs/${id}/conversation/reply`, payload: { body: "top-level note" } });
+  assert.equal(plain.statusCode, 200);
+  assert.ok(calls.some((a) => a.includes("repos/o/r/issues/5/comments")));
+
+  const empty = await app.inject({ method: "POST", url: `/api/prs/${id}/conversation/reply`, payload: { body: "  " } });
+  assert.equal(empty.statusCode, 400);
+});
+
 test("POST /api/prs/:id/post 404s for a missing pr", async () => {
   const app = buildApp(deps());
   const res = await app.inject({ method: "POST", url: "/api/prs/9999/post" });
