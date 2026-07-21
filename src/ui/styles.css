@@ -889,9 +889,10 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-discussion {
   position: absolute;
   top: 52px;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 60;
-  width: 420px;
+  width: 840px;
   max-width: calc(100vw - 32px);
   max-height: 70vh;
   display: flex;
