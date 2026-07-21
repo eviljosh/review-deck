@@ -907,7 +907,23 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
   padding: 8px 12px; border-bottom: 1px solid var(--border);
 }
 .wt-discussion-head h4 { margin: 0; font-size: 13px; }
-.wt-discussion-body { overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.wt-discussion-body {
+  overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface-subtle);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+/* Each comment in the popover sits in its own box on the darker backdrop so
+   boundaries read at a glance. Thread cards go flat to avoid double-boxing. */
+.wt-discussion-body .wt-thread-comment {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin-bottom: 0;
+}
+.wt-discussion-body .wt-thread { background: none; border: none; padding: 0; margin: 0; }
+.wt-discussion-body .wt-thread .wt-thread-comment { margin-bottom: 4px; }
+.wt-discussion-body .wt-thread .wt-thread-comment:last-of-type { margin-bottom: 0; }
 .wt-discussion-divider {
   font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--text-muted); border-top: 1px solid var(--border-muted); padding-top: 8px; margin-top: 2px;
