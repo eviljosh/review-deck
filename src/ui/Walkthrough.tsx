@@ -355,18 +355,40 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   // The PR's existing GitHub conversation — fetched live on open, refreshable.
   const [convo, setConvo] = useState<GhConversation>({ threads: [], overall: [] });
   const [convoLoading, setConvoLoading] = useState(false);
+  // Unread signal: the first fetch is the baseline; anything a later ↻ refresh
+  // brings in that we haven't marked seen counts as new. Keys are prefixed so
+  // thread-comment and PR-level ids can't collide.
+  const seenIds = useRef<Set<string> | null>(null);
+  const [unread, setUnread] = useState(0);
+  const convoKeys = (v: GhConversation) => [
+    ...v.threads.flatMap((t) => t.comments.map((c) => `t${c.id}`)),
+    ...v.overall.map((c) => `o${c.id}`),
+  ];
   const loadConvo = () => {
     setConvoLoading(true);
-    getConversation(pr.id).then(setConvo).catch(() => {}).finally(() => setConvoLoading(false));
+    getConversation(pr.id)
+      .then((v) => {
+        setConvo(v);
+        if (seenIds.current === null) seenIds.current = new Set(convoKeys(v));
+        else setUnread(convoKeys(v).filter((k) => !seenIds.current!.has(k)).length);
+      })
+      .catch(() => {})
+      .finally(() => setConvoLoading(false));
   };
-  useEffect(loadConvo, [pr.id]);
+  useEffect(() => {
+    seenIds.current = null;
+    setUnread(0);
+    loadConvo();
+  }, [pr.id]);
 
   function appendThreadReply(rootId: number, body: string) {
     const c = { id: -Date.now(), author: "you", body, createdAt: new Date().toISOString(), bot: false };
+    seenIds.current?.add(`t${c.id}`); // our own reply is never "unread"
     setConvo((v) => ({ ...v, threads: v.threads.map((t) => (t.rootId === rootId ? { ...t, comments: [...t.comments, c] } : t)) }));
   }
   function appendOverall(body: string) {
     const c = { id: -Date.now(), author: "you", body, createdAt: new Date().toISOString(), bot: false };
+    seenIds.current?.add(`o${c.id}`);
     setConvo((v) => ({ ...v, overall: [...v.overall, c] }));
   }
 
@@ -533,11 +555,17 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
         </div>
         <div className="wt-header-right">
           <button
-            className={`btn btn-sm ${discussionOpen ? "btn-active" : ""}`}
-            title="PR-level comments, review verdicts, and threads without a diff line"
-            onClick={() => setDiscussionOpen((s) => !s)}
+            className={`btn btn-sm ${discussionOpen ? "btn-active" : ""} ${unread > 0 ? "wt-unread" : ""}`}
+            title={unread > 0
+              ? `${unread} new comment${unread === 1 ? "" : "s"} since you last looked (inline threads included)`
+              : "PR-level comments, review verdicts, and threads without a diff line"}
+            onClick={() => {
+              setDiscussionOpen((s) => !s);
+              seenIds.current = new Set(convoKeys(convo));
+              setUnread(0);
+            }}
           >
-            💬 Discussion{discussionCount > 0 ? ` (${discussionCount})` : ""}
+            💬 Discussion{discussionCount > 0 ? ` (${discussionCount})` : ""}{unread > 0 ? ` · ${unread} new` : ""}
           </button>
           <button className="btn btn-sm" title="Re-fetch comments and threads from GitHub" onClick={loadConvo} disabled={convoLoading}>
             {convoLoading ? "↻ Refreshing…" : "↻ Comments"}

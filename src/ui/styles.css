@@ -399,6 +399,16 @@ a:hover { text-decoration: underline; }
 }
 .post-event-compact { font-size: 12px; padding: 3px 6px; }
 .btn-active { background: var(--accent-soft); border-color: var(--accent); }
+.btn.wt-unread {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: unread-pulse 2s ease-in-out infinite;
+}
+@keyframes unread-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+  50% { box-shadow: 0 0 0 4px var(--accent-soft); }
+}
 
 .toast {
   position: fixed;
