@@ -162,7 +162,30 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <input type="number" min={1} value={Math.round(settings.engineTimeoutMs / 60000)}
               onChange={(e) => patch({ engineTimeoutMs: Math.max(1, Number(e.target.value) || 10) * 60000 })} />
           </label>
+          <label>Claude transport
+            <select value={settings.claudeTransport} onChange={(e) => patch({ claudeTransport: e.target.value as "sdk" | "cli" })}>
+              <option value="sdk">Agent SDK (default)</option>
+              <option value="cli">claude CLI (claude -p)</option>
+            </select>
+          </label>
+          {settings.claudeTransport === "cli" && (
+            <label>CLI credentials
+              <select value={settings.claudeCliAuth} onChange={(e) => patch({ claudeCliAuth: e.target.value as "env" | "stored-login" })}>
+                <option value="env">inherit env (key → token → login)</option>
+                <option value="stored-login">stored login only</option>
+              </select>
+            </label>
+          )}
         </div>
+        {settings.claudeTransport === "cli" && (
+          <p className="hint-text">
+            CLI transport spawns your locally installed <code>claude</code> (min {`v2.1`}) with settings
+            isolation — no user/project settings or repo CLAUDE.md are loaded. With “inherit env”, an
+            <code> ANTHROPIC_API_KEY</code> or <code>CLAUDE_CODE_OAUTH_TOKEN</code> in the server’s
+            environment outranks your <code>claude /login</code> session; choose “stored login only” to
+            scrub those from the spawned CLI so reviews always run as the logged-in account.
+          </p>
+        )}
       </div>
 
       <div className="section">

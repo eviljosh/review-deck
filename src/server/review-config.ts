@@ -24,6 +24,21 @@ export interface ReviewConfig {
   /** Claude model alias passed to the agent SDK (e.g. "opus", "sonnet"). */
   claudeModel: string;
   /**
+   * Transport for Claude calls. "sdk" (default) runs through the bundled
+   * Agent SDK; "cli" spawns the locally installed `claude` CLI (`claude -p`)
+   * with settings isolation. The CLI path exists mainly for accounts whose
+   * contractual terms (e.g. BAA/ZDR) cover CLI or API-key usage but not an
+   * OAuth token through the SDK.
+   */
+  claudeTransport: "sdk" | "cli";
+  /**
+   * CLI-transport credentials. "env" follows normal precedence (API key →
+   * OAuth token → stored login); "stored-login" scrubs credential env vars
+   * from the spawned CLI so runs always use the machine's `claude /login`
+   * session — a leftover token in .env can never silently take over.
+   */
+  claudeCliAuth: "env" | "stored-login";
+  /**
    * Codex model + reasoning effort. Leave undefined to inherit whatever the
    * local `codex` CLI has configured in ~/.codex/config.toml.
    */
@@ -73,6 +88,8 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   maxConcurrentReviews: 4,
   maxConcurrentPipelines: 4,
   claudeModel: "opus",
+  claudeTransport: "sdk",
+  claudeCliAuth: "env",
   // codexModel unset → inherit the CLI's configured model. Reasoning effort
   // pinned to "medium" for faster review passes; bump to "high" for deeper
   // analysis at the cost of latency.
@@ -95,11 +112,15 @@ export function loadReviewConfig(db: Database.Database): ReviewConfig {
   if (!raw) return DEFAULT_REVIEW_CONFIG;
   try {
     const stored = JSON.parse(raw) as Partial<ReviewConfig>;
-    return {
+    const merged = {
       ...DEFAULT_REVIEW_CONFIG,
       ...stored,
       engines: { ...DEFAULT_REVIEW_CONFIG.engines, ...(stored.engines ?? {}) },
     };
+    // Enum fields: coerce anything unexpected back to the safe default.
+    if (merged.claudeTransport !== "cli") merged.claudeTransport = "sdk";
+    if (merged.claudeCliAuth !== "stored-login") merged.claudeCliAuth = "env";
+    return merged;
   } catch {
     return DEFAULT_REVIEW_CONFIG;
   }

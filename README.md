@@ -76,6 +76,28 @@ The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved 
 
 The server logs which path it picked at startup (`claude auth: …`).
 
+#### Claude transport: Agent SDK vs. `claude -p`
+
+By default the Claude reviewer runs through the bundled Agent SDK. In **⚙ Settings → Claude
+transport** you can switch it to spawn your locally installed `claude` CLI (`claude -p`)
+instead. This exists mainly for accounts whose contractual terms (e.g. BAA / zero-data-retention)
+cover CLI or API-key usage but not an OAuth token through the SDK — check your own agreement;
+this tool only controls which binary runs.
+
+Details of the CLI transport:
+
+- Requires `claude` ≥ **2.1.0** on the server's PATH (probed before each review; a too-old or
+  missing binary fails the run with a clear error).
+- Runs with **settings isolation** (`--setting-sources ""`): your user/project/local Claude
+  settings and the reviewed repo's `CLAUDE.md` are not loaded — parity with the SDK's clean-room
+  behavior, and it keeps a malicious PR from injecting instructions into the reviewer. Enterprise
+  *managed* settings deployed by your IT still apply (by design — they're not bypassable).
+- **CLI credentials** sub-setting: "inherit env" follows the normal precedence (API key → OAuth
+  token → the machine's `claude /login` session). Note that a leftover token in `.env` outranks
+  your login. Choose **"stored login only"** to scrub credential env vars from the spawned CLI so
+  every review is guaranteed to run as the logged-in account — the setting to pick for the
+  compliance case above (make sure you've run `/login` in `claude` on this machine first).
+
 ### Codex (ChatGPT login or `OPENAI_API_KEY`) — required unless Codex is disabled
 
 The Codex reviewer shells out to the local `codex` CLI, which authenticates via either:

@@ -10,6 +10,8 @@ export interface ReviewSettings {
   maxConcurrentReviews: number;
   maxConcurrentPipelines: number;
   claudeModel: string;
+  claudeTransport: "sdk" | "cli";
+  claudeCliAuth: "env" | "stored-login";
   codexModel?: string;
   codexReasoningEffort?: string;
   engineTimeoutMs: number;

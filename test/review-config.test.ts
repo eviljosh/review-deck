@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_REVIEW_CONFIG, engineModelOptions, loadReviewConfig, saveReviewConfig, parseDimensions, parseRiskFlags } from "../src/server/review-config.ts";
-import { openDb } from "../src/server/db.ts";
+import { openDb, setSetting } from "../src/server/db.ts";
 
 test("default config enables both engines, all dimensions, claude finalizer", () => {
   assert.equal(DEFAULT_REVIEW_CONFIG.engines.claude, true);
@@ -61,4 +61,16 @@ test("engineModelOptions: codex omits everything when both are unset", () => {
 test("engineModelOptions: codex forwards configured model + effort", () => {
   const cfg = { ...DEFAULT_REVIEW_CONFIG, codexModel: "gpt-5.6-sol", codexReasoningEffort: "high" as const };
   assert.deepEqual(engineModelOptions(cfg, "codex"), { model: "gpt-5.6-sol", reasoningEffort: "high" });
+});
+
+test("claude transport defaults to sdk/env and coerces invalid stored values", () => {
+  const db = openDb(":memory:");
+  assert.equal(loadReviewConfig(db).claudeTransport, "sdk");
+  assert.equal(loadReviewConfig(db).claudeCliAuth, "env");
+  saveReviewConfig(db, { claudeTransport: "cli", claudeCliAuth: "stored-login" });
+  assert.equal(loadReviewConfig(db).claudeTransport, "cli");
+  assert.equal(loadReviewConfig(db).claudeCliAuth, "stored-login");
+  setSetting(db, "review_config", JSON.stringify({ claudeTransport: "carrier-pigeon", claudeCliAuth: 42 }));
+  assert.equal(loadReviewConfig(db).claudeTransport, "sdk");
+  assert.equal(loadReviewConfig(db).claudeCliAuth, "env");
 });

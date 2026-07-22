@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout } from "node:timers/promises";
-import { openDb, insertFinding, listFindings, getPr, updatePr, insertPr } from "../src/server/db.ts";
+import { openDb, insertFinding, listFindings, getPr, updatePr, insertPr, setSetting } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import type { LlmEngine } from "../src/server/engines/types.ts";
 import type { WsMessage } from "../src/shared/types.ts";
@@ -141,6 +141,24 @@ test("POST /api/prs/:id/retry returns ok for an existing pr", async () => {
   const retry = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
   assert.equal(retry.statusCode, 200);
   assert.deepEqual(retry.json(), { ok: true });
+});
+
+test("claudeTransport=cli routes pipeline and chat Claude calls through the CLI engine", async () => {
+  const d = deps();
+  let cliRuns = 0;
+  let sdkRuns = 0;
+  const answer = (system: string) =>
+    system.includes("triaging") ? triageJson : system.includes("finalizing") ? finalJson : findingsJson;
+  d.claude = { name: "claude", run: async (req) => { sdkRuns++; return { text: answer(req.system) }; } };
+  const cliFake: typeof d.claude = { name: "claude", run: async (req) => { cliRuns++; return { text: answer(req.system) }; } };
+  const app = buildApp({ ...d, claudeCli: cliFake });
+  setSetting(d.db, "review_config", JSON.stringify({ claudeTransport: "cli" }));
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
+  assert.equal(getPr(d.db, id)!.stage, "ready");
+  assert.ok(cliRuns > 0, "cli engine should have run");
+  assert.equal(sdkRuns, 0, "sdk engine must not run when transport=cli");
 });
 
 test("POST /api/prs/:id/retry 404s for a missing pr", async () => {

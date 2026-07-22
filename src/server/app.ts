@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { Exec } from "./exec.ts";
 import type { WsHub } from "./ws.ts";
 import type { LlmEngine } from "./engines/types.ts";
+import { makeClaudeCliEngine } from "./engines/claude-cli.ts";
 import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
@@ -24,6 +25,8 @@ export interface AppDeps {
   exec: Exec;
   claude: LlmEngine;
   codex: LlmEngine;
+  /** Optional override for the CLI-transport Claude engine (tests). */
+  claudeCli?: LlmEngine;
   config: ReviewConfig;
   dataDir: string;
   hub: WsHub;
@@ -33,6 +36,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const { db, exec, claude, codex, config, dataDir, hub } = deps;
   const app = Fastify({ logger: false });
   const pipelineLimit = pLimit(config.maxConcurrentPipelines);
+
+  // Claude transport selection, per launch/turn. CLI engines are cached per
+  // auth mode so the `claude --version` probe runs once per server process.
+  const cliEngines = new Map<string, LlmEngine>();
+  function claudeEngine(cfg: ReviewConfig): LlmEngine {
+    if (cfg.claudeTransport !== "cli") return claude;
+    if (deps.claudeCli) return deps.claudeCli;
+    let engine = cliEngines.get(cfg.claudeCliAuth);
+    if (!engine) {
+      engine = makeClaudeCliEngine({ auth: cfg.claudeCliAuth });
+      cliEngines.set(cfg.claudeCliAuth, engine);
+    }
+    return engine;
+  }
 
   // Live pipelines keyed by PR id, so /cancel can abort an in-flight (or queued) run.
   const running = new Map<number, AbortController>();
@@ -44,7 +61,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const liveConfig = loadReviewConfig(db);
     firePipeline(
       () =>
-        pipelineLimit(() => runPipeline({ db, exec, claude, codex, config: liveConfig, dataDir, hub }, prId, controller.signal, resumeFrom)).finally(() => {
+        pipelineLimit(() => runPipeline({ db, exec, claude: claudeEngine(liveConfig), codex, config: liveConfig, dataDir, hub }, prId, controller.signal, resumeFrom)).finally(() => {
           // Only clear if this is still the current controller (a fast retry may
           // have replaced it).
           if (running.get(prId) === controller) running.delete(prId);
@@ -403,9 +420,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (chatBusy.has(id)) return reply.code(409).send({ error: "chat is already answering" });
     chatBusy.add(id);
     const cfg = loadReviewConfig(db);
+    const chatEngine = claudeEngine(cfg);
     // Fire-and-forget; the answer streams over the WebSocket.
     void runChatTurn(
-      { db, engine: claude, dataDir, hub, modelOptions: engineModelOptions(cfg, claude.name), timeoutMs: cfg.engineTimeoutMs },
+      { db, engine: chatEngine, dataDir, hub, modelOptions: engineModelOptions(cfg, chatEngine.name), timeoutMs: cfg.engineTimeoutMs },
       id, message,
     ).catch((err) => console.error(`chat turn failed for pr ${id}`, err))
       .finally(() => chatBusy.delete(id));
