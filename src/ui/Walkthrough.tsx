@@ -841,6 +841,13 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
             <button className="btn btn-sm btn-ghost" onClick={() => setDiscussionOpen(false)}>✕</button>
           </div>
           <div className="wt-discussion-body">
+            {pr.discussion && (
+              <div className="wt-discussion-summary">
+                <div className="wt-discussion-divider">Triage's read on the discussion</div>
+                <Md>{pr.discussion}</Md>
+              </div>
+            )}
+            {pr.discussion && <div className="wt-discussion-divider">Comments</div>}
             {discussionCount === 0 && <div className="wt-quiet">No PR-level comments yet.</div>}
             {convo.overall.map((c, i) => (
               <div key={`${c.id}-${i}`} className="wt-thread-comment">
