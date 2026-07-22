@@ -919,35 +919,37 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
   background: var(--surface-subtle);
   border-radius: 0 0 var(--radius) var(--radius);
 }
-/* Each comment in the popover sits in its own box on the darker backdrop so
-   boundaries read at a glance. Thread cards go flat to avoid double-boxing. */
-.wt-discussion-body .wt-thread-comment {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  margin-bottom: 0;
-}
+/* The popover body is already the darker backdrop, so thread cards go flat
+   there to avoid double-boxing — comments sit directly on the panel. */
 .wt-discussion-body .wt-thread { background: none; border: none; padding: 0; margin: 0; }
-.wt-discussion-body .wt-thread .wt-thread-comment { margin-bottom: 4px; }
-.wt-discussion-body .wt-thread .wt-thread-comment:last-of-type { margin-bottom: 0; }
 .wt-discussion-divider {
   font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--text-muted); border-top: 1px solid var(--border-muted); padding-top: 8px; margin-top: 2px;
 }
 
 /* Existing GitHub review-comment threads — visually distinct from findings
-   (neutral border, no severity edge) so "already discussed" reads at a glance. */
+   (neutral border, no severity edge) so "already discussed" reads at a glance.
+   Each comment is its own card on a slightly darker thread backdrop, so where
+   one comment ends and a reply begins is unmistakable. */
 .wt-thread {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px 10px; margin: 2px 0;
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px; margin: 2px 0;
   font-family: var(--sans); font-size: 13px;
 }
-.wt-thread-comment { margin-bottom: 6px; }
+.wt-thread-comment {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 10px;
+  margin-bottom: 6px;
+}
 .wt-thread-comment:last-child { margin-bottom: 0; }
 .wt-thread-comment p { margin: 2px 0; }
-.wt-thread-author { display: block; font-weight: 600; font-size: 12px; color: var(--text-muted); }
-.wt-thread-reply { margin-top: 2px; }
+.wt-comment-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 2px;
+}
+.wt-thread-author { font-weight: 600; font-size: 13px; color: var(--text); }
+.wt-comment-date { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex: none; }
+.wt-thread-reply { margin-top: 4px; }
 .wt-review-state { font-weight: 600; text-transform: none; }
 .wt-review-approved { color: var(--green); }
 .wt-review-changes_requested { color: var(--red); }

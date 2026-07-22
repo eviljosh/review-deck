@@ -211,6 +211,37 @@ function FindingCard({
   );
 }
 
+/** "3d ago" for the past week, then "Jul 18" (year added when not current). */
+function prettyDate(iso: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const min = Math.round((Date.now() - d.getTime()) / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.round(h / 24);
+  if (days < 7) return `${days}d ago`;
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
+}
+
+/** Author (+ optional review verdict) left, timestamp right — tops every comment card. */
+function CommentHead({ author, createdAt, bot, state }: { author: string; createdAt: string; bot?: boolean; state?: string }) {
+  const when = prettyDate(createdAt);
+  return (
+    <div className="wt-comment-head">
+      <span className="wt-thread-author">
+        {bot ? "🤖 " : ""}{author}
+        {state && <span className={`wt-review-state wt-review-${state.toLowerCase()}`}> {state.toLowerCase().replace("_", " ")}</span>}
+      </span>
+      {when && <span className="wt-comment-date" title={new Date(createdAt).toLocaleString()}>{when}</span>}
+    </div>
+  );
+}
+
 /**
  * An existing GitHub review-comment thread. Replies go to GitHub immediately
  * (they are not batched with the pending review, matching GitHub's own flow).
@@ -246,7 +277,7 @@ function ThreadCard({
     <div className="wt-thread">
       {thread.comments.map((c) => (
         <div key={c.id} className="wt-thread-comment">
-          <span className="wt-thread-author">{c.bot ? "🤖 " : ""}{c.author}</span>
+          <CommentHead author={c.author} createdAt={c.createdAt} bot={c.bot} />
           <Md>{c.body}</Md>
         </div>
       ))}
@@ -489,7 +520,9 @@ const FileSection = memo(function FileSection({
                         />
                       ) : (
                         <div className="wt-comment">
-                          <span className="wt-comment-tag">💬 you{c.posted ? " · posted" : ""}</span>
+                          <span className="wt-comment-tag">
+                            💬 you{c.posted ? " · posted" : ""}{prettyDate(c.created_at) ? ` · ${prettyDate(c.created_at)}` : ""}
+                          </span>
                           <Md inline>{c.body}</Md>
                           {!c.posted && (
                             <span className="wt-comment-actions">
@@ -851,10 +884,7 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
             {discussionCount === 0 && <div className="wt-quiet">No PR-level comments yet.</div>}
             {convo.overall.map((c, i) => (
               <div key={`${c.id}-${i}`} className="wt-thread-comment">
-                <span className="wt-thread-author">
-                  {c.author}
-                  {c.state && <span className={`wt-review-state wt-review-${c.state.toLowerCase()}`}> {c.state.toLowerCase().replace("_", " ")}</span>}
-                </span>
+                <CommentHead author={c.author} createdAt={c.createdAt} bot={c.bot} state={c.state} />
                 <Md>{c.body}</Md>
               </div>
             ))}
