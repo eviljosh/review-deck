@@ -61,16 +61,20 @@ need:
 cp .env.example .env
 ```
 
-### Claude (`CLAUDE_CODE_OAUTH_TOKEN`) — required for reviews
+### Claude (`ANTHROPIC_API_KEY`, falling back to `CLAUDE_CODE_OAUTH_TOKEN`) — required for reviews
 
-The Claude reviewer runs through the Claude Agent SDK. Provide a token one of two ways:
+The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved in this order:
 
-- **Generate a token:** run `claude setup-token` and put the result in `.env` as
-  `CLAUDE_CODE_OAUTH_TOKEN=…`, **or**
-- **Inherit your existing Claude Code login:** if you're already logged into Claude Code, start
-  the server from a shell where that login is active and the SDK will use it. (If you rely on
-  the shell login rather than `.env`, start the server from a fresh terminal so the token is
-  loaded.)
+1. **Anthropic API key (primary):** create a key at [console.anthropic.com](https://console.anthropic.com)
+   and put it in `.env` as `ANTHROPIC_API_KEY=…`. Usage is billed to your Anthropic account.
+   When a key is set, any OAuth token in the environment is ignored.
+2. **Claude Code OAuth token (fallback):** run `claude setup-token` and put the result in `.env`
+   as `CLAUDE_CODE_OAUTH_TOKEN=…`. This bills your Claude subscription instead.
+3. **Inherited Claude Code login:** with neither set, start the server from a shell where you're
+   already logged into Claude Code and the SDK will use that login. (Start from a fresh terminal
+   if the login is newer than your current shell.)
+
+The server logs which path it picked at startup (`claude auth: …`).
 
 ### Codex (ChatGPT login or `OPENAI_API_KEY`) — required unless Codex is disabled
 
