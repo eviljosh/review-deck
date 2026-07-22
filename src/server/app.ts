@@ -108,17 +108,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!pr) {
       return reply.code(404).send({ error: "pr not found" });
     }
-    // A posted PR is a historical record of what went to GitHub; re-running the
-    // pipeline would wipe those findings and re-arm the Post button.
-    if (pr.stage === "posted") {
-      return reply.code(409).send({ error: "review already posted — delete and re-add the PR to review it again" });
-    }
     const claim = db.prepare("UPDATE prs SET status = 'running', error = NULL WHERE id = ? AND status <> 'running'").run(id);
     if (claim.changes === 0) return reply.code(409).send({ error: "already running" });
     hub.broadcast({ type: "pr_log_reset", prId: id });
     hub.broadcast({ type: "pr_updated", pr: getPr(db, id)! });
     // A PR that died mid-pipeline resumes at the stage it was in; completed
-    // ones (ready) re-run from the top as a fresh review.
+    // ones (ready, and posted — e.g. re-reviewing after the author pushed)
+    // re-run from the top as a fresh review. Re-posting after a posted re-run
+    // adds a second review on GitHub; the UI confirms before retrying those.
     const midPipeline: Stage[] = ["prepare", "triage", "deep_review", "synthesize"];
     const resumeFrom = midPipeline.includes(pr.stage) ? pr.stage : undefined;
     launch(id, `retry pipeline failed for ${id}`, resumeFrom);

@@ -316,7 +316,19 @@ export function PrDetail({
               ⊘ Cancel
             </button>
           ) : (
-            <button className="btn btn-sm" onClick={() => retryPr(pr.id).catch((e) => alert(String(e)))}>
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                if (
+                  pr.stage === "posted" &&
+                  !confirm(
+                    "This PR already has a posted review. Re-running starts a fresh review " +
+                    "of the current head; posting again will add a second review on GitHub.\n\nContinue?",
+                  )
+                ) return;
+                retryPr(pr.id).catch((e) => alert(String(e)));
+              }}
+            >
               ↻ Retry
             </button>
           )}
@@ -471,7 +483,7 @@ export function PrDetail({
               className="preface-textarea"
               value={preface}
               onChange={(e) => setPreface(e.target.value)}
-              onBlur={persistPreface}
+              onBlur={() => persistPreface()}
               disabled={posted}
             />
             {!posted && (

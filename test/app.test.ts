@@ -11,7 +11,7 @@ import { DEFAULT_REVIEW_CONFIG } from "../src/server/review-config.ts";
 
 const triageJson = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] }, focusAreas: [] });
 const findingsJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f" }] });
-const finalJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", agreement: false }] });
+const finalJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false }] });
 
 function deps() {
   const exec: Exec = async (cmd, args) => {
@@ -155,15 +155,21 @@ test("POST /api/prs/:id/retry 404s for a non-integer id", async () => {
   assert.equal(retry.statusCode, 404);
 });
 
-test("POST /api/prs/:id/retry 409s when the review was already posted", async () => {
+test("POST /api/prs/:id/retry on a posted PR starts a fresh full re-review", async () => {
   const d = deps();
   const app = buildApp(d);
   const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
   const id = post.json().created[0].id;
+  // let the creation-time pipeline finish before simulating the posted state
+  for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
   updatePr(d.db, id, { stage: "posted", status: "done" });
   const res = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
-  assert.equal(res.statusCode, 409);
-  assert.match(res.json().error, /already posted/);
+  assert.equal(res.statusCode, 200);
+  // wait for the relaunched pipeline to finish; it should land back at ready
+  for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
+  const pr = getPr(d.db, id)!;
+  assert.equal(pr.stage, "ready");
+  assert.equal(pr.status, "done");
 });
 
 test("POST /api/prs/:id/findings/select-all flips every unposted finding", async () => {

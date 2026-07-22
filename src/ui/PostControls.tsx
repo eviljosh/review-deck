@@ -6,13 +6,13 @@ import { getDefaultPreface, postReview, refreshStatus, setPrPreface } from "./ap
  * The PR's top-level review comment: the stored per-PR value, falling back to
  * the saved default for PRs that never set one. `persist` saves on blur.
  */
-export function usePreface(pr: PrRecord): [string, (v: string) => void, () => void] {
+export function usePreface(pr: PrRecord): [string, (v: string) => void, (v?: string) => void] {
   const [preface, setPreface] = useState("");
   useEffect(() => {
     if (pr.preface != null) setPreface(pr.preface);
     else getDefaultPreface().then((d) => setPreface((cur) => cur || d));
   }, [pr.id, pr.preface]);
-  const persist = () => { setPrPreface(pr.id, preface).catch(() => {}); };
+  const persist = (v?: string) => { setPrPreface(pr.id, v ?? preface).catch(() => {}); };
   return [preface, setPreface, persist];
 }
 
