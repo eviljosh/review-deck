@@ -156,7 +156,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       updatePr(db, id, {
         prior_findings: snapshot ?? null,
         summary: null, headline: null, danger_level: null, danger_reasons: null,
-        focus_areas: null, danger_flags: null, finding_themes: null,
+        focus_areas: null, danger_flags: null, finding_themes: null, discussion: null,
         goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
         review_verdict: null, file_guide: null,
       });

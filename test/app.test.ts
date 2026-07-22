@@ -190,7 +190,7 @@ test("POST /api/prs/:id/retry on a posted PR wipes the old review, snapshots pos
   const id = post.json().created[0].id;
   // let the creation-time pipeline finish before simulating the posted state
   for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
-  updatePr(d.db, id, { stage: "posted", status: "done", review_verdict: "old verdict", file_guide: "[]" });
+  updatePr(d.db, id, { stage: "posted", status: "done", review_verdict: "old verdict", file_guide: "[]", discussion: "stale discussion recap" });
   d.db.prepare("UPDATE findings SET posted = 1, selected = 1 WHERE pr_id = ?").run(id);
   const oldWhat = listFindings(d.db, id)[0].what;
 
@@ -204,6 +204,7 @@ test("POST /api/prs/:id/retry on a posted PR wipes the old review, snapshots pos
   assert.ok(pr.prior_findings && pr.prior_findings.includes(oldWhat), pr.prior_findings ?? "null");
   // …and the visible review is entirely the fresh run's output (no posted leftovers)
   assert.ok(listFindings(d.db, id).every((f) => !f.posted));
+  assert.notEqual(pr.discussion, "stale discussion recap"); // wiped, then re-set by the new triage
 });
 
 test("POST /api/prs/:id/findings/select-all flips every unposted finding", async () => {
