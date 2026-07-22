@@ -610,6 +610,13 @@ a:hover { text-decoration: underline; }
 /* ---------- runs timeline ---------- */
 
 .runs { list-style: none; padding: 0; margin: 0; }
+.runs-transport {
+  margin-left: 10px;
+  font-size: 11.5px;
+  font-weight: 400;
+  font-family: var(--mono);
+  color: var(--text-muted);
+}
 .run-item {
   display: flex;
   align-items: center;

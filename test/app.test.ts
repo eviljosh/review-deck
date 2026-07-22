@@ -159,6 +159,16 @@ test("claudeTransport=cli routes pipeline and chat Claude calls through the CLI 
   assert.equal(getPr(d.db, id)!.stage, "ready");
   assert.ok(cliRuns > 0, "cli engine should have run");
   assert.equal(sdkRuns, 0, "sdk engine must not run when transport=cli");
+  assert.equal(getPr(d.db, id)!.claude_transport, "cli (env credentials)");
+});
+
+test("launch stamps claude_transport=sdk by default", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+  for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
+  assert.equal(getPr(d.db, id)!.claude_transport, "sdk");
 });
 
 test("POST /api/prs/:id/retry 404s for a missing pr", async () => {

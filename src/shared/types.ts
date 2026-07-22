@@ -140,6 +140,7 @@ export interface PrRecord {
   review_verdict: string | null; // finalizer: 1–2 sentence bottom line for the reviewer
   file_guide: string | null;     // JSON-encoded FileGuideEntry[] — suggested reading order
   prior_findings: string | null; // JSON snapshot of the last POSTED review's findings, taken at re-run
+  claude_transport: string | null; // provenance: Claude transport used by the most recent run (e.g. "sdk", "cli (stored login)")
   created_at: string;
   updated_at: string;
 }

@@ -59,6 +59,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // Load settings fresh per launch so edits in the settings UI apply without
     // a restart (concurrency limits are boot-time — they live in the limiter).
     const liveConfig = loadReviewConfig(db);
+    // Provenance stamp: which Claude transport this run uses. Persisted on the
+    // PR (shown in the Runs section) and echoed into the live log, so a
+    // compliance-sensitive user can verify the path after the fact.
+    const transport = liveConfig.claudeTransport === "cli"
+      ? `cli (${liveConfig.claudeCliAuth === "stored-login" ? "stored login" : "env credentials"})`
+      : "sdk";
+    updatePr(db, prId, { claude_transport: transport });
+    hub.broadcast({ type: "pr_log", prId, stage: "pipeline", chunk: `[pipeline] claude transport: ${transport}\n` });
     firePipeline(
       () =>
         pipelineLimit(() => runPipeline({ db, exec, claude: claudeEngine(liveConfig), codex, config: liveConfig, dataDir, hub }, prId, controller.signal, resumeFrom)).finally(() => {

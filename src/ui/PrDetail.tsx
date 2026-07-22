@@ -538,7 +538,14 @@ export function PrDetail({
 
         {runs.length > 0 && (
           <div className="section">
-            <h3>Runs</h3>
+            <h3>
+              Runs
+              {pr.claude_transport && (
+                <span className="runs-transport" title="Claude transport used by the most recent run">
+                  claude via {pr.claude_transport}
+                </span>
+              )}
+            </h3>
             <ul className="runs">
               {runs.map((r) => {
                 const duration = formatDuration(r.started_at, r.ended_at);
