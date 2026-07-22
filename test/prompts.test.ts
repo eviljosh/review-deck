@@ -129,3 +129,14 @@ test("buildFinalizerPrompt asks for impact + verdict and embeds the goal context
   // goal block omitted without context
   assert.doesNotMatch(buildFinalizerPrompt([]).system, /distilled goal/);
 });
+
+test("buildFinalizerPrompt embeds prior-review findings with reconcile instructions", () => {
+  const { system } = buildFinalizerPrompt([], {
+    priorFindings: [{ file: "a.ts", line: 12, severity: "serious", what: "races with retry loop", suggestedFix: "lock it" }],
+  });
+  assert.match(system, /PREVIOUS review of an EARLIER commit/);
+  assert.match(system, /\[serious\] a\.ts:12 — races with retry loop/);
+  assert.match(system, /do NOT re-report/);
+  assert.match(system, /what improved and what remains open/);
+  assert.doesNotMatch(buildFinalizerPrompt([]).system, /PREVIOUS review/);
+});

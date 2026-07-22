@@ -139,6 +139,7 @@ export interface PrRecord {
   goal_gaps: string | null;      // JSON-encoded string[]
   review_verdict: string | null; // finalizer: 1–2 sentence bottom line for the reviewer
   file_guide: string | null;     // JSON-encoded FileGuideEntry[] — suggested reading order
+  prior_findings: string | null; // JSON snapshot of the last POSTED review's findings, taken at re-run
   created_at: string;
   updated_at: string;
 }

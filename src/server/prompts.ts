@@ -93,9 +93,17 @@ export function buildFullDiffReviewPrompt(
   return { system, prompt: metaBlock(meta, diff, intent) };
 }
 
+export interface PriorFinding {
+  file: string;
+  line: number | null;
+  severity: string;
+  what: string;
+  suggestedFix: string;
+}
+
 export function buildFinalizerPrompt(
   raw: Finding[],
-  context?: { goal?: string; goalVerdict?: string; rejectedExamples?: string[] },
+  context?: { goal?: string; goalVerdict?: string; rejectedExamples?: string[]; priorFindings?: PriorFinding[] },
 ): { system: string; prompt: string } {
   const goalBlock = context?.goal?.trim()
     ? [
@@ -116,6 +124,24 @@ export function buildFinalizerPrompt(
         "positives) unless this instance is clearly more severe than the rejected examples.",
       ]
     : [];
+  // Re-review continuity: this PR was reviewed and posted on before; the new
+  // review should explicitly reconcile against what was already raised.
+  const priorBlock = context?.priorFindings?.length
+    ? [
+        "",
+        "A PREVIOUS review of an EARLIER commit of this PR posted these findings:",
+        ...context.priorFindings.map(
+          (p) => `  • [${p.severity}] ${p.file}${p.line !== null ? `:${p.line}` : ""} — ${p.what}`,
+        ),
+        "For each one, check whether the current diff has addressed it:",
+        "  • Addressed → do NOT re-report it. Acknowledge progress in \"verdict\"",
+        "    (e.g. \"resolves N of the M concerns from the previous review\").",
+        "  • Still unaddressed → it must appear in your findings (carry it forward yourself if",
+        "    the raw findings missed it; line numbers may have shifted — re-anchor to the",
+        "    current diff, or use line null if it no longer maps).",
+        "The verdict MUST say what improved and what remains open since the previous review.",
+      ]
+    : [];
   const system = [
     PROMPT_INJECTION_GUARD, "",
     "You are finalizing a code review. You are given raw findings from MULTIPLE independent",
@@ -128,6 +154,7 @@ export function buildFinalizerPrompt(
     "and code fences); these render in the UI and get posted to GitHub as-is.",
     ...goalBlock,
     ...rejectedBlock,
+    ...priorBlock,
     "",
     "For each finalized finding, set \"sources\" to which engines flagged it",
     "(the raw findings carry an \"engine\" field). \"agreement\" is true when sources has 2+ engines.",

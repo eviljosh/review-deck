@@ -8,7 +8,7 @@ import type { LlmEngine } from "./engines/types.ts";
 import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { runChatTurn } from "./chat.ts";
 import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
-import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, listChatMessages, clearChatMessages } from "./db.ts";
+import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, listChatMessages, clearChatMessages, replaceFindings } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -110,14 +110,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     const claim = db.prepare("UPDATE prs SET status = 'running', error = NULL WHERE id = ? AND status <> 'running'").run(id);
     if (claim.changes === 0) return reply.code(409).send({ error: "already running" });
-    hub.broadcast({ type: "pr_log_reset", prId: id });
-    hub.broadcast({ type: "pr_updated", pr: getPr(db, id)! });
     // A PR that died mid-pipeline resumes at the stage it was in; completed
     // ones (ready, and posted — e.g. re-reviewing after the author pushed)
     // re-run from the top as a fresh review. Re-posting after a posted re-run
     // adds a second review on GitHub; the UI confirms before retrying those.
     const midPipeline: Stage[] = ["prepare", "triage", "deep_review", "synthesize"];
     const resumeFrom = midPipeline.includes(pr.stage) ? pr.stage : undefined;
+    if (!resumeFrom) {
+      // Fresh re-run: snapshot what the last posted review said (the finalizer
+      // checks the new diff against it), then clear the old review outright so
+      // stale findings/summaries never linger in the UI, survive a failed
+      // re-run, or get merged into the next posted review.
+      const postedFindings = listFindings(db, id).filter((f) => f.posted);
+      const snapshot = postedFindings.length > 0
+        ? JSON.stringify(postedFindings.map((f) => ({
+            file: f.file, line: f.line, severity: f.severity, what: f.what, suggestedFix: f.suggestedFix,
+          })))
+        : pr.prior_findings; // nothing newly posted — keep the older snapshot, if any
+      replaceFindings(db, id, []);
+      updatePr(db, id, {
+        prior_findings: snapshot ?? null,
+        summary: null, headline: null, danger_level: null, danger_reasons: null,
+        focus_areas: null, danger_flags: null, finding_themes: null,
+        goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
+        review_verdict: null, file_guide: null,
+      });
+      hub.broadcast({ type: "findings_updated", prId: id });
+    }
+    hub.broadcast({ type: "pr_log_reset", prId: id });
+    hub.broadcast({ type: "pr_updated", pr: getPr(db, id)! });
     launch(id, `retry pipeline failed for ${id}`, resumeFrom);
     return { ok: true };
   });

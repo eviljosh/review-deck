@@ -158,3 +158,22 @@ test("runSynthesize degrades (keeps raw) when finalizer returns bad JSON", async
   assert.equal(kept.length, 2); // raw pooled findings kept
   assert.ok(kept.every((f) => f.selected)); // serious raw findings stay pre-selected
 });
+
+test("runSynthesize feeds the prior_findings snapshot into the finalizer prompt", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  updatePr(db, pr.id, {
+    prior_findings: JSON.stringify([{ file: "a.ts", line: 3, severity: "serious", what: "old bug", suggestedFix: "fix" }]),
+  });
+  let seenSystem = "";
+  const finalizer: LlmEngine = {
+    name: "claude",
+    run: async (req) => {
+      seenSystem = req.system;
+      return { text: JSON.stringify({ findings: [] }) };
+    },
+  };
+  await runSynthesize({ db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} }, pr.id, raw);
+  assert.match(seenSystem, /PREVIOUS review/);
+  assert.match(seenSystem, /old bug/);
+});

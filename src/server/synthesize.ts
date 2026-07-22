@@ -5,7 +5,7 @@ import type { LlmEngine } from "./engines/types.ts";
 import type { PrRecord, Finding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
-import { buildFinalizerPrompt } from "./prompts.ts";
+import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
 import { parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
@@ -45,6 +45,17 @@ export interface SynthesizeDeps {
   feedbackEnabled?: boolean;
 }
 
+// Snapshot of the previous posted review (taken at re-run time); best-effort parse.
+function parsePriorFindings(json: string | null): PriorFinding[] | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as PriorFinding[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Finding[]): Promise<PrRecord> {
   const { db, exec, finalizer, dataDir, onUpdate, onLog } = deps;
   const modelOptions = deps.modelOptions ?? { model: finalizer.name === "claude" ? "opus" : undefined };
@@ -72,6 +83,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       goal: pr.goal ?? undefined,
       goalVerdict: pr.goal_verdict ?? undefined,
       ...(deps.feedbackEnabled ? { rejectedExamples: listRejectedExamples(db, pr.owner, pr.repo) } : {}),
+      priorFindings: parsePriorFindings(pr.prior_findings),
     });
     const res = await finalizer.run(
       { system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions, maxTurns: 20, signal: deps.signal, timeoutMs: deps.timeoutMs },

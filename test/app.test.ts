@@ -155,21 +155,27 @@ test("POST /api/prs/:id/retry 404s for a non-integer id", async () => {
   assert.equal(retry.statusCode, 404);
 });
 
-test("POST /api/prs/:id/retry on a posted PR starts a fresh full re-review", async () => {
+test("POST /api/prs/:id/retry on a posted PR wipes the old review, snapshots posted findings, re-reviews fresh", async () => {
   const d = deps();
   const app = buildApp(d);
   const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
   const id = post.json().created[0].id;
   // let the creation-time pipeline finish before simulating the posted state
   for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
-  updatePr(d.db, id, { stage: "posted", status: "done" });
+  updatePr(d.db, id, { stage: "posted", status: "done", review_verdict: "old verdict", file_guide: "[]" });
+  d.db.prepare("UPDATE findings SET posted = 1, selected = 1 WHERE pr_id = ?").run(id);
+  const oldWhat = listFindings(d.db, id)[0].what;
+
   const res = await app.inject({ method: "POST", url: `/api/prs/${id}/retry` });
   assert.equal(res.statusCode, 200);
-  // wait for the relaunched pipeline to finish; it should land back at ready
   for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
   const pr = getPr(d.db, id)!;
   assert.equal(pr.stage, "ready");
   assert.equal(pr.status, "done");
+  // old posted findings became the prior-review snapshot for the finalizer…
+  assert.ok(pr.prior_findings && pr.prior_findings.includes(oldWhat), pr.prior_findings ?? "null");
+  // …and the visible review is entirely the fresh run's output (no posted leftovers)
+  assert.ok(listFindings(d.db, id).every((f) => !f.posted));
 });
 
 test("POST /api/prs/:id/findings/select-all flips every unposted finding", async () => {

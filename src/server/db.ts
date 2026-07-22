@@ -132,6 +132,7 @@ const NEW_PR_COLUMNS: [string, string][] = [
   ["goal_gaps", "TEXT"],
   ["review_verdict", "TEXT"],
   ["file_guide", "TEXT"],
+  ["prior_findings", "TEXT"],
 ];
 
 export function migrate(db: Database.Database): void {
@@ -292,7 +293,7 @@ const PR_COLUMNS = new Set([
   "pr_state", "mergeable", "review_decision", "checks",
   "head_sha", "base_sha", "latest_sha",
   "goal", "goal_verdict", "goal_explanation", "goal_gaps", "review_verdict",
-  "file_guide",
+  "file_guide", "prior_findings",
 ]);
 
 export function updatePr(
