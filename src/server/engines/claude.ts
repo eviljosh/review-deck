@@ -44,6 +44,10 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
             permissionMode: "dontAsk",
             abortController,
             ...(req.model ? { model: req.model } : {}),
+            // Extended thinking: `thinking` turns it on (adaptive), `effort` guides
+            // its depth. Omitted unless the caller asked, so most runs keep SDK defaults.
+            ...(req.thinking ? { thinking: req.thinking } : {}),
+            ...(req.effort ? { effort: req.effort } : {}),
             ...(req.maxTurns ? { maxTurns: req.maxTurns } : {}),
           },
         });

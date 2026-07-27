@@ -158,6 +158,14 @@ export function Settings({ onClose }: { onClose: () => void }) {
               <option value="codex">codex</option>
             </select>
           </label>
+          <label>Finalizer thinking <span className="hint-inline">(Claude finalizer only)</span>
+            <select value={settings.finalizerEffort} onChange={(e) => patch({ finalizerEffort: e.target.value as "off" | "high" | "xhigh" | "max" })}>
+              <option value="off">off</option>
+              <option value="high">high (default)</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+          </label>
           <label>Engine timeout (min)
             <input type="number" min={1} value={Math.round(settings.engineTimeoutMs / 60000)}
               onChange={(e) => patch({ engineTimeoutMs: Math.max(1, Number(e.target.value) || 10) * 60000 })} />

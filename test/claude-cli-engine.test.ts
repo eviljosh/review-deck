@@ -84,6 +84,21 @@ test("happy path: flags, stdin prompt, streamed logs, final text", async () => {
   assert.match(a[a.indexOf("--allowedTools") + 1], /Read,Grep,Glob/);
   assert.match(a[a.indexOf("--disallowedTools") + 1], /Edit,Write/);
   assert.equal(a[a.indexOf("--model") + 1], "opus");
+  assert.equal(a.includes("--effort"), false); // omitted when the request has no effort
+});
+
+test("forwards --effort when the request carries an effort level", async () => {
+  const f = fakeSpawn("2.1.217");
+  const engine = makeClaudeCliEngine({ spawnImpl: f.spawn });
+  const resP = engine.run({ ...req, effort: "xhigh", thinking: { type: "adaptive" } }, () => {});
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  f.children[1].finish([RESULT]);
+  await resP;
+  const a = f.calls[1].args;
+  assert.equal(a[a.indexOf("--effort") + 1], "xhigh");
+  // no separate thinking flag on the CLI — req.thinking is intentionally a no-op
+  assert.equal(a.some((x) => x.includes("thinking")), false);
 });
 
 test("env auth mode passes credentials through; stored-login scrubs them", async () => {

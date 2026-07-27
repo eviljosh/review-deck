@@ -11,6 +11,7 @@ test("default config enables both engines, all dimensions, claude finalizer", ()
   assert.ok(!DEFAULT_REVIEW_CONFIG.dimensions.some((d) => d.key === "python")); // no repo-specific dims
   assert.ok(!DEFAULT_REVIEW_CONFIG.riskFlags.some((f) => f.key === "phi"));     // no company-specific flags
   assert.equal(DEFAULT_REVIEW_CONFIG.finalizerEngine, "claude");
+  assert.equal(DEFAULT_REVIEW_CONFIG.finalizerEffort, "high");
   assert.equal(DEFAULT_REVIEW_CONFIG.maxConcurrentReviews, 4);
   assert.equal(DEFAULT_REVIEW_CONFIG.maxConcurrentPipelines, 4);
   assert.equal(DEFAULT_REVIEW_CONFIG.claudeModel, "opus");
@@ -73,4 +74,13 @@ test("claude transport defaults to sdk/env and coerces invalid stored values", (
   setSetting(db, "review_config", JSON.stringify({ claudeTransport: "carrier-pigeon", claudeCliAuth: 42 }));
   assert.equal(loadReviewConfig(db).claudeTransport, "sdk");
   assert.equal(loadReviewConfig(db).claudeCliAuth, "env");
+});
+
+test("finalizerEffort defaults to high, round-trips a valid value, and coerces junk", () => {
+  const db = openDb(":memory:");
+  assert.equal(loadReviewConfig(db).finalizerEffort, "high");
+  saveReviewConfig(db, { finalizerEffort: "off" });
+  assert.equal(loadReviewConfig(db).finalizerEffort, "off");
+  setSetting(db, "review_config", JSON.stringify({ finalizerEffort: "banana" }));
+  assert.equal(loadReviewConfig(db).finalizerEffort, "high");
 });
