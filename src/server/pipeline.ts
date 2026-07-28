@@ -139,8 +139,14 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
 
   if (checkpoint()) return;
   const finalizer = config.finalizerEngine === "codex" ? codex : claude;
+  // Extended thinking is Claude-only and applies to the finalizer alone (the
+  // heaviest reasoning step). The inline `!== "off"` narrows the effort union so
+  // "off" is never passed as an EffortLevel.
+  const finalizerThinking = finalizer === claude && config.finalizerEffort !== "off"
+    ? { thinking: { type: "adaptive" as const }, effort: config.finalizerEffort }
+    : {};
   try {
-    await recordStage(db, prId, "synthesize", aborted, () => runSynthesize({ db, exec, finalizer, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, finalizer.name), signal, timeoutMs: config.engineTimeoutMs, feedbackEnabled: config.feedbackLoop }, prId, raw), onLog);
+    await recordStage(db, prId, "synthesize", aborted, () => runSynthesize({ db, exec, finalizer, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, finalizer.name), signal, timeoutMs: config.engineTimeoutMs, feedbackEnabled: config.feedbackLoop, ...finalizerThinking }, prId, raw), onLog);
     hub.broadcast({ type: "findings_updated", prId });
   } catch (err) { onStageError("synthesize", err); return; }
 }

@@ -68,3 +68,26 @@ test("engine passes read-only options and model to the query fn", async () => {
   assert.equal(captured.cwd, "/wt");
   assert.equal(captured.systemPrompt, "sys");
 });
+
+test("engine forwards thinking + effort when set, and omits them otherwise", async () => {
+  let captured: Record<string, unknown> = {};
+  const q: QueryFn = ({ options }) => {
+    captured = options;
+    return (async function* () {
+      yield { type: "result", subtype: "success", result: "ok" } as AgentMessage;
+    })();
+  };
+  const engine = makeClaudeEngine(q);
+
+  await engine.run(
+    { system: "s", prompt: "p", workdir: "/wt", thinking: { type: "adaptive" }, effort: "xhigh" },
+    () => {},
+  );
+  assert.deepEqual(captured.thinking, { type: "adaptive" });
+  assert.equal(captured.effort, "xhigh");
+
+  captured = {};
+  await engine.run({ system: "s", prompt: "p", workdir: "/wt" }, () => {});
+  assert.equal("thinking" in captured, false);
+  assert.equal("effort" in captured, false);
+});

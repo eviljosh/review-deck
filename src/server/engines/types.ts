@@ -2,12 +2,32 @@ export type LogSink = (chunk: string) => void;
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
+/**
+ * Claude's effort dial (SDK `effort` query option), which guides adaptive-thinking
+ * depth. Distinct from ReasoningEffort (Codex): it includes "max" and omits "minimal".
+ */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Claude extended-thinking config (SDK `thinking` query option). "adaptive" lets
+ * the model decide when/how much to think (the mode on Opus 4.6+); "enabled" pins
+ * a fixed budget for older models. Supersedes the deprecated maxThinkingTokens.
+ */
+export type ThinkingConfig =
+  | { type: "adaptive" }
+  | { type: "enabled"; budgetTokens: number }
+  | { type: "disabled" };
+
 export interface AgentRequest {
   system: string;
   prompt: string;
   workdir: string;
   model?: string;
   reasoningEffort?: ReasoningEffort;
+  // Claude-only (SDK) extended-thinking controls; the Codex engine ignores these
+  // and uses reasoningEffort instead.
+  thinking?: ThinkingConfig;
+  effort?: EffortLevel;
   maxTurns?: number;
   timeoutMs?: number;
   signal?: AbortSignal;

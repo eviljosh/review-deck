@@ -133,6 +133,35 @@ test("runSynthesize feeds past rejected examples into the finalizer only when en
   assert.doesNotMatch(seenSystem, /missing test for logging/);
 });
 
+test("runSynthesize forwards extended-thinking to the finalizer only when provided", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  let seenThinking: unknown;
+  let seenEffort: unknown;
+  const finalizer: LlmEngine = { name: "claude", run: async (req) => {
+    seenThinking = req.thinking;
+    seenEffort = req.effort;
+    return { text: JSON.stringify({ findings: [] }) };
+  } };
+
+  await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), thinking: { type: "adaptive" }, effort: "xhigh", onUpdate: () => {} },
+    pr.id, raw,
+  );
+  assert.deepEqual(seenThinking, { type: "adaptive" });
+  assert.equal(seenEffort, "xhigh");
+
+  // not provided → the finalizer request carries neither
+  seenThinking = "sentinel";
+  seenEffort = "sentinel";
+  await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id, raw,
+  );
+  assert.equal(seenThinking, undefined);
+  assert.equal(seenEffort, undefined);
+});
+
 test("runSynthesize with empty raw findings advances to ready with none", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);

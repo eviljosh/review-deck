@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Exec } from "./exec.ts";
-import type { LlmEngine } from "./engines/types.ts";
+import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts";
 import type { PrRecord, Finding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
@@ -43,6 +43,9 @@ export interface SynthesizeDeps {
   timeoutMs?: number;
   /** Opt-in: inject past rejected findings for this repo into the finalizer. */
   feedbackEnabled?: boolean;
+  // Extended thinking for the finalizer run (Claude only; see ReviewConfig.finalizerEffort).
+  thinking?: ThinkingConfig;
+  effort?: EffortLevel;
 }
 
 // Snapshot of the previous posted review (taken at re-run time); best-effort parse.
@@ -86,7 +89,12 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       priorFindings: parsePriorFindings(pr.prior_findings),
     });
     const res = await finalizer.run(
-      { system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions, maxTurns: 20, signal: deps.signal, timeoutMs: deps.timeoutMs },
+      {
+        system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions,
+        ...(deps.thinking ? { thinking: deps.thinking } : {}),
+        ...(deps.effort ? { effort: deps.effort } : {}),
+        maxTurns: 20, signal: deps.signal, timeoutMs: deps.timeoutMs,
+      },
       (c) => onLog?.(prId, "synthesize", c),
     );
     writeArtifacts(dir, { "raw-findings.json": JSON.stringify(raw, null, 2), "finalizer-raw.txt": res.text });

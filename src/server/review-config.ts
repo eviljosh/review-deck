@@ -19,6 +19,16 @@ export interface ReviewConfig {
   dimensions: DimensionDef[];
   riskFlags: RiskFlagDef[];
   finalizerEngine: "claude" | "codex";
+  /**
+   * Extended-thinking effort for the (Claude) finalizer only. Synthesize is the
+   * heaviest reasoning step — merge/dedupe/theme/impact-rank across every engine's
+   * findings — so when not "off" it runs with adaptive thinking at this effort
+   * level. "high" (default) matches the SDK's own default depth; bump to "xhigh"
+   * or "max" for deeper synthesis at more latency/cost (both fall back to "high"
+   * on models that don't support them). No effect when the finalizer is Codex
+   * (Codex uses codexReasoningEffort).
+   */
+  finalizerEffort: "off" | "high" | "xhigh" | "max";
   maxConcurrentReviews: number;
   maxConcurrentPipelines: number;
   /** Claude model alias passed to the agent SDK (e.g. "opus", "sonnet"). */
@@ -83,6 +93,7 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   dimensions: DEFAULT_DIMENSIONS,
   riskFlags: DEFAULT_RISK_FLAGS,
   finalizerEngine: "claude",
+  finalizerEffort: "high",
   // NOTE: 4×4 = up to 16 concurrent LLM calls at full saturation. If a burst of
   // PRs trips subscription rate limits, lower maxConcurrentPipelines (2–3).
   maxConcurrentReviews: 4,
@@ -120,6 +131,7 @@ export function loadReviewConfig(db: Database.Database): ReviewConfig {
     // Enum fields: coerce anything unexpected back to the safe default.
     if (merged.claudeTransport !== "cli") merged.claudeTransport = "sdk";
     if (merged.claudeCliAuth !== "stored-login") merged.claudeCliAuth = "env";
+    if (!["off", "high", "xhigh", "max"].includes(merged.finalizerEffort)) merged.finalizerEffort = "high";
     return merged;
   } catch {
     return DEFAULT_REVIEW_CONFIG;

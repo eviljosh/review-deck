@@ -7,6 +7,7 @@ export interface ReviewSettings {
   dimensions: DimensionDef[];
   riskFlags: RiskFlagDef[];
   finalizerEngine: "claude" | "codex";
+  finalizerEffort: "off" | "high" | "xhigh" | "max";
   maxConcurrentReviews: number;
   maxConcurrentPipelines: number;
   claudeModel: string;

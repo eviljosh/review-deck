@@ -133,6 +133,11 @@ export function makeClaudeCliEngine(
         "--allowedTools", READ_ONLY_TOOLS.join(","),
         "--disallowedTools", DENY_TOOLS.join(","),
         ...(req.model ? ["--model", req.model] : []),
+        // Effort dial (parity with the SDK engine's `effort`). Adaptive thinking
+        // is the model default here, so the CLI has no separate `--thinking` flag —
+        // `--effort` is the whole lever. `req.thinking` is therefore a no-op on
+        // this transport (adaptive is already on).
+        ...(req.effort ? ["--effort", req.effort] : []),
       ];
 
       const child = spawnImpl("claude", args, { cwd: req.workdir, env });
