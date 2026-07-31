@@ -116,6 +116,58 @@ test("fetchPrDiscussion drops the tool's own previously-posted reviews and comme
   assert.ok(!out.includes("review-deck:automated"), out);
 });
 
+test("fetchPrDiscussion drops CI-bot noise (codecov, github-actions, [bot] suffix)", async () => {
+  const exec: Exec = async (cmd, args) => {
+    if (args[0] === "pr" && args[1] === "view") {
+      return {
+        stdout: JSON.stringify({
+          reviews: [
+            { author: { login: "sonarcloud" }, body: "Quality gate passed", state: "COMMENTED", submittedAt: "2026-07-10T09:00:00Z" },
+            { author: { login: "alice" }, body: "real feedback", state: "APPROVED", submittedAt: "2026-07-10T10:00:00Z" },
+          ],
+          comments: [
+            { author: { login: "codecov" }, body: "## Codecov Report\nhuge coverage table", createdAt: "2026-07-10T08:00:00Z" },
+            { author: { login: "github-actions" }, body: "PR exceeds 500 lines", createdAt: "2026-07-10T08:01:00Z" },
+            { author: { login: "linear-code" }, body: "<!-- linear-linkback -->", createdAt: "2026-07-10T08:02:00Z" },
+            { author: { login: "bob" }, body: "human question", createdAt: "2026-07-10T11:00:00Z" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      stdout: JSON.stringify([
+        { user: { login: "coderabbitai[bot]" }, body: "nit: rename this", path: "x.ts", line: 1, created_at: "2026-07-10T07:00:00Z" },
+      ]),
+      stderr: "",
+    };
+  };
+  const out = await fetchPrDiscussion(exec, "o", "r", 5);
+  assert.ok(out.includes("alice"));
+  assert.ok(out.includes("bob"));
+  for (const noise of ["codecov", "github-actions", "linear-code", "sonarcloud", "coderabbitai"]) {
+    assert.ok(!out.includes(noise), `expected ${noise} to be filtered:\n${out}`);
+  }
+});
+
+test("fetchPrDiscussion truncation drops the oldest activity, keeps the newest", async () => {
+  const exec: Exec = async (cmd, args) => {
+    if (args[0] === "pr" && args[1] === "view") {
+      return {
+        stdout: JSON.stringify({
+          reviews: [{ author: { login: "alice" }, body: "recent review verdict", state: "CHANGES_REQUESTED", submittedAt: "2026-07-10T12:00:00Z" }],
+          comments: [{ author: { login: "bob" }, body: "OLDWALL ".repeat(10_000), createdAt: "2026-07-10T08:00:00Z" }],
+        }),
+        stderr: "",
+      };
+    }
+    return { stdout: "[]", stderr: "" };
+  };
+  const out = await fetchPrDiscussion(exec, "o", "r", 5);
+  assert.ok(out.startsWith("…(older activity truncated)"), out.slice(0, 80));
+  assert.ok(out.includes("recent review verdict"), "newest entry must survive truncation");
+});
+
 test("fetchPrDiscussion returns empty string when there is no activity", async () => {
   const exec: Exec = async (cmd, args) =>
     args[0] === "pr" ? { stdout: JSON.stringify({ reviews: [], comments: [] }), stderr: "" } : { stdout: "[]", stderr: "" };
@@ -257,6 +309,28 @@ test("fetchPrConversation collects review decisions and issue comments, filterin
   const c = await fetchPrConversation(exec, "o", "r", 5);
   assert.deepEqual(c.overall.map((x) => x.author), ["erin", "carol"]); // chronological
   assert.equal(c.overall[1].state, "APPROVED");
+});
+
+test("fetchPrConversation drops CI-bot noise from overall comments, reviews, and threads", async () => {
+  const exec = convoExec(
+    [
+      { id: 1, user: { login: "codecov[bot]" }, body: "coverage inline", path: "a.ts", line: 3, side: "RIGHT", created_at: "2026-01-01" },
+      { id: 2, user: { login: "alice" }, body: "human thread", path: "b.ts", line: 8, side: "RIGHT", created_at: "2026-01-02" },
+    ],
+    {
+      reviews: [
+        { id: 10, author: { login: "sonarcloud" }, body: "Quality gate passed", state: "COMMENTED", submittedAt: "2026-01-02" },
+        { id: 11, author: { login: "carol" }, body: "ship it", state: "APPROVED", submittedAt: "2026-01-03" },
+      ],
+      comments: [
+        { id: 20, author: { login: "codecov" }, body: "## Codecov Report", createdAt: "2026-01-01" },
+        { id: 21, author: { login: "erin" }, body: "human comment", createdAt: "2026-01-04" },
+      ],
+    },
+  );
+  const c = await fetchPrConversation(exec, "o", "r", 5);
+  assert.deepEqual(c.overall.map((x) => x.author), ["carol", "erin"]);
+  assert.deepEqual(c.threads.map((t) => t.rootId), [2]); // codecov-only thread dropped
 });
 
 test("fetchPrConversation degrades to an empty conversation on gh errors", async () => {

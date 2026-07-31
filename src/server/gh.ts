@@ -44,6 +44,26 @@ export async function fetchPrMeta(
   };
 }
 
+// Automated CI/integration accounts whose PR comments are machine noise
+// (coverage tables, size warnings, ticket linkbacks) rather than review
+// discussion. GraphQL (`gh pr view`) reports app logins bare ("codecov");
+// REST reports them with a "[bot]" suffix ("codecov[bot]") — match both.
+const NOISE_AUTHORS = new Set([
+  "codecov",
+  "github-actions",
+  "linear-code",
+  "dependabot",
+  "renovate",
+  "vercel",
+  "netlify",
+  "sonarcloud",
+]);
+
+export function isCiBotAuthor(login: string | undefined): boolean {
+  if (!login) return false;
+  return login.endsWith("[bot]") || NOISE_AUTHORS.has(login.replace(/\[bot\]$/, "").toLowerCase());
+}
+
 // Existing review activity on the PR — reviews (with decision state), issue
 // comments, and inline review comments — flattened into a chronological text
 // transcript for the triage model to summarize. Best-effort: returns "" if
@@ -71,13 +91,14 @@ export async function fetchPrDiscussion(
       if (!body && (!r.state || r.state === "COMMENTED")) continue;
       // Skip our own previously-posted reviews — otherwise a re-review would
       // summarize the tool's earlier output as if it were human discussion.
-      if (isBotAuthored(body)) continue;
+      if (isBotAuthored(body) || isCiBotAuthor(r.author?.login)) continue;
       const state = r.state && r.state !== "COMMENTED" ? ` [${r.state}]` : "";
       entries.push({ at: r.submittedAt ?? "", text: `Review by ${r.author?.login ?? "unknown"}${state}: ${body || "(no body)"}` });
     }
     for (const c of j.comments ?? []) {
       const body = (c.body ?? "").trim();
-      if (body && !isBotAuthored(body)) entries.push({ at: c.createdAt ?? "", text: `Comment by ${c.author?.login ?? "unknown"}: ${body}` });
+      if (!body || isBotAuthored(body) || isCiBotAuthor(c.author?.login)) continue;
+      entries.push({ at: c.createdAt ?? "", text: `Comment by ${c.author?.login ?? "unknown"}: ${body}` });
     }
   } catch {
     // no reviews/comments available — fine
@@ -93,7 +114,7 @@ export async function fetchPrDiscussion(
     if (Array.isArray(arr)) {
       for (const c of arr) {
         const body = (c.body ?? "").trim();
-        if (!body || isBotAuthored(body)) continue;
+        if (!body || isBotAuthored(body) || isCiBotAuthor(c.user?.login)) continue;
         const loc = c.path ? ` on ${c.path}:${c.line ?? c.original_line ?? "?"}` : "";
         entries.push({ at: c.created_at ?? "", text: `Inline comment by ${c.user?.login ?? "unknown"}${loc}: ${body}` });
       }
@@ -104,8 +125,10 @@ export async function fetchPrDiscussion(
 
   entries.sort((a, b) => a.at.localeCompare(b.at));
   let out = entries.map((e) => e.text).join("\n\n");
-  const CAP = 8000; // bound the prompt; long threads get truncated
-  if (out.length > CAP) out = out.slice(0, CAP) + "\n\n…(older activity truncated)";
+  const CAP = 50_000; // bound the prompt; long threads get truncated
+  // Entries are oldest-first, so trim from the front: recent activity is what
+  // the reviewer most needs summarized.
+  if (out.length > CAP) out = "…(older activity truncated)\n\n" + out.slice(out.length - CAP);
   return out;
 }
 
@@ -153,7 +176,7 @@ export async function fetchPrConversation(
         cs.sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
         const root = byId.get(rootId) ?? cs[0];
         const comments: GhComment[] = cs
-          .filter((c) => (c.body ?? "").trim())
+          .filter((c) => (c.body ?? "").trim() && !isCiBotAuthor(c.user?.login))
           .map((c) => ({
             id: c.id,
             author: c.user?.login ?? "unknown",
@@ -189,9 +212,9 @@ export async function fetchPrConversation(
     for (const r of j.reviews ?? []) {
       const body = (r.body ?? "").trim();
       // Same rule as the triage transcript: keep decisions and bodies, skip
-      // empty COMMENTED shells and this tool's own posted reviews.
+      // empty COMMENTED shells, this tool's own posted reviews, and CI bots.
       if (!body && (!r.state || r.state === "COMMENTED")) continue;
-      if (isBotAuthored(body)) continue;
+      if (isBotAuthored(body) || isCiBotAuthor(r.author?.login)) continue;
       overall.push({
         id: r.id ?? 0,
         author: r.author?.login ?? "unknown",
@@ -203,7 +226,7 @@ export async function fetchPrConversation(
     }
     for (const c of j.comments ?? []) {
       const body = (c.body ?? "").trim();
-      if (!body || isBotAuthored(body)) continue;
+      if (!body || isBotAuthored(body) || isCiBotAuthor(c.author?.login)) continue;
       overall.push({ id: c.id ?? 0, author: c.author?.login ?? "unknown", body, createdAt: c.createdAt ?? "", bot: false });
     }
     overall.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
