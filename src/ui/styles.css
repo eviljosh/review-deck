@@ -901,6 +901,17 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-progress-fill { height: 100%; background: var(--green); transition: width 0.2s ease; }
 .wt-progress-label { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
 
+/* ripple note: out-of-diff impact, context pane */
+.wt-ripple {
+  margin-top: 8px;
+  background: var(--amber-bg);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+.wt-ripple-head { font-weight: 600; color: var(--amber); font-size: 11.5px; margin-bottom: 3px; }
+
 /* mark-reviewed toggle in the diff file header */
 .wt-reviewed-btn {
   margin-left: auto; flex-shrink: 0;

@@ -55,6 +55,10 @@ test("buildFinalizerPrompt asks for a cohort reading plan with attention classes
   assert.match(system, /never mechanical/i);
   // every changed file must appear in the plan
   assert.match(system, /EVERY changed file/i);
+  // ripple notes: out-of-diff caller impact, explicitly optional
+  assert.match(system, /"ripple"/);
+  assert.match(system, /OUTSIDE this diff/);
+  assert.match(system, /OMIT the field/i);
   // themes were deprecated in favor of cohorts
   assert.doesNotMatch(system, /"themes"/);
   assert.doesNotMatch(system, /"theme": string/);

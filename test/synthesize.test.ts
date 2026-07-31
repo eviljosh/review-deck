@@ -47,7 +47,7 @@ test("runSynthesize persists the cohort reading plan and a flattened file_guide"
   const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
     plan: { cohorts: [
       { label: "Core logic", why: "Where the behavior changes.", files: [
-        { path: "x.ts", class: "crux", role: "The decision.", walkthrough: "- `run()` drives the retry loop." },
+        { path: "x.ts", class: "crux", role: "The decision.", walkthrough: "- `run()` drives the retry loop.", ripple: "`caller.ts:9` still passes the old options shape." },
       ] },
       { label: "Mechanical", why: "Renames only.", files: [
         { path: "y.ts", class: "mechanical", role: "Rename `Foo`→`Bar` — no logic change." },
@@ -67,7 +67,9 @@ test("runSynthesize persists the cohort reading plan and a flattened file_guide"
   assert.equal(plan.cohorts.length, 2); // empty cohort dropped
   assert.equal(plan.cohorts[0].label, "Core logic");
   assert.equal(plan.cohorts[0].files[0].class, "crux");
+  assert.equal(plan.cohorts[0].files[0].ripple, "`caller.ts:9` still passes the old options shape.");
   assert.equal(plan.cohorts[1].files[0].class, "mechanical");
+  assert.equal("ripple" in plan.cohorts[1].files[0], false); // absent, not empty-string
   // flat guide mirrors the plan order for anything still reading file_guide
   assert.deepEqual(JSON.parse(result.file_guide!).map((f: { path: string }) => f.path), ["x.ts", "y.ts"]);
 });

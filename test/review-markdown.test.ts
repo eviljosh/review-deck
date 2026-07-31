@@ -19,7 +19,7 @@ function seedReviewed() {
     danger_flags: JSON.stringify(["api_contract"]),
     reading_plan: JSON.stringify({ cohorts: [
       { label: "Core logic", why: "Where the behavior changes.", files: [
-        { path: "src/retry.ts", class: "crux", role: "The retry wrapper itself." },
+        { path: "src/retry.ts", class: "crux", role: "The retry wrapper itself.", ripple: "`src/jobs.ts:88` still assumes fetch throws on first failure." },
       ] },
       { label: "Mechanical", why: "", files: [
         { path: "src/index.ts", class: "mechanical", role: "Re-export only." },
@@ -53,6 +53,7 @@ test("buildReviewMarkdown includes header, goal+verdict+gaps, bottom line, ratin
   assert.match(md, /## Reading plan/);
   assert.match(md, /### Core logic/);
   assert.match(md, /`src\/retry\.ts` _\(crux\)_ — The retry wrapper itself\./);
+  assert.match(md, /⚠ ripple: `src\/jobs\.ts:88` still assumes fetch throws on first failure\./);
   assert.match(md, /`src\/index\.ts` _\(mechanical\)_ — Re-export only\./);
   assert.match(md, /## Findings \(2\)/);
   assert.match(md, /`src\/retry\.ts:12` — retry loop has no upper bound/);

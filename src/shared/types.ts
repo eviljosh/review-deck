@@ -55,6 +55,8 @@ export type ChangeClass = "crux" | "substantive" | "boilerplate" | "mechanical";
 
 export interface PlanFile extends FileGuideEntry {
   class: ChangeClass;
+  /** Out-of-diff impact: un-updated callers of changed signatures, broken contract assumptions. */
+  ripple?: string;
 }
 
 /** An ordered conceptual group of files, read foundation-first. */

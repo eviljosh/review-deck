@@ -17,6 +17,7 @@ const planFileSchema = z.object({
   class: z.enum(["crux", "substantive", "boilerplate", "mechanical"]).optional(),
   role: z.string(),
   walkthrough: z.string().optional(),
+  ripple: z.string().optional(),
 });
 
 const finalSchema = z.object({
@@ -130,7 +131,13 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
           cohorts: cohorts.map((c) => ({
             label: c.label,
             why: c.why ?? "",
-            files: c.files.map((f) => ({ path: f.path, class: f.class ?? "substantive", role: f.role, ...(f.walkthrough?.trim() ? { walkthrough: f.walkthrough } : {}) })),
+            files: c.files.map((f) => ({
+              path: f.path,
+              class: f.class ?? "substantive",
+              role: f.role,
+              ...(f.walkthrough?.trim() ? { walkthrough: f.walkthrough } : {}),
+              ...(f.ripple?.trim() ? { ripple: f.ripple } : {}),
+            })),
           })),
         }
       : parsed.value.files?.length

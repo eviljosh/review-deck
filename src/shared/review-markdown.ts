@@ -79,7 +79,10 @@ export function buildReviewMarkdown(
     lines.push("", "## Reading plan", "");
     for (const c of plan.cohorts) {
       if (c.label) lines.push(`### ${c.label}`, ...(c.why ? ["", c.why] : []), "");
-      for (const f of c.files) lines.push(`- \`${f.path}\` _(${f.class})_ — ${f.role}`);
+      for (const f of c.files) {
+        lines.push(`- \`${f.path}\` _(${f.class})_ — ${f.role}`);
+        if (f.ripple?.trim()) lines.push(`  - ⚠ ripple: ${f.ripple.trim().replace(/\n+/g, " ")}`);
+      }
       lines.push("");
     }
     while (lines[lines.length - 1] === "") lines.pop();

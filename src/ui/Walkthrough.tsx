@@ -1187,6 +1187,12 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                 {planOf(current.path)!.walkthrough?.trim() && (
                   <Md>{planOf(current.path)!.walkthrough!}</Md>
                 )}
+                {planOf(current.path)!.ripple?.trim() && (
+                  <div className="wt-ripple">
+                    <div className="wt-ripple-head">⚠ Ripple — impact outside this diff</div>
+                    <Md>{planOf(current.path)!.ripple!}</Md>
+                  </div>
+                )}
               </div>
             )}
             <div className="wt-section">
