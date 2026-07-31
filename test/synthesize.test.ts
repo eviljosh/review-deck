@@ -41,13 +41,21 @@ test("runSynthesize persists finalized findings, marks anchorable, advances to r
   assert.equal(findings[0].selected, true); // serious + agreement → pre-selected
 });
 
-test("runSynthesize persists themes and per-finding theme labels", async () => {
+test("runSynthesize persists the cohort reading plan and a flattened file_guide", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
   const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    themes: [{ label: "Sandbox escape", summary: "Network isolation gaps" }, { label: "Unused", summary: "dropped" }],
+    plan: { cohorts: [
+      { label: "Core logic", why: "Where the behavior changes.", files: [
+        { path: "x.ts", class: "crux", role: "The decision.", walkthrough: "- `run()` drives the retry loop." },
+      ] },
+      { label: "Mechanical", why: "Renames only.", files: [
+        { path: "y.ts", class: "mechanical", role: "Rename `Foo`→`Bar` — no logic change." },
+      ] },
+      { label: "Empty", why: "dropped", files: [] },
+    ] },
     findings: [
-      { dimension: "security", severity: "blocking", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", theme: "Sandbox escape", sources: ["claude"], agreement: false },
+      { dimension: "security", severity: "blocking", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
     ],
   }) }) };
   const result = await runSynthesize(
@@ -55,10 +63,29 @@ test("runSynthesize persists themes and per-finding theme labels", async () => {
     pr.id, raw,
   );
   assert.equal(result.stage, "ready");
-  assert.equal(listFindings(db, pr.id)[0].theme, "Sandbox escape");
-  const themes = JSON.parse(getPr(db, pr.id)!.finding_themes!);
-  // only themes referenced by a finding are kept ("Unused" is dropped)
-  assert.deepEqual(themes, [{ label: "Sandbox escape", summary: "Network isolation gaps" }]);
+  const plan = JSON.parse(result.reading_plan!);
+  assert.equal(plan.cohorts.length, 2); // empty cohort dropped
+  assert.equal(plan.cohorts[0].label, "Core logic");
+  assert.equal(plan.cohorts[0].files[0].class, "crux");
+  assert.equal(plan.cohorts[1].files[0].class, "mechanical");
+  // flat guide mirrors the plan order for anything still reading file_guide
+  assert.deepEqual(JSON.parse(result.file_guide!).map((f: { path: string }) => f.path), ["x.ts", "y.ts"]);
+});
+
+test("runSynthesize defaults a missing class to substantive (never auto-collapse unclassified)", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
+    plan: { cohorts: [{ label: "All", why: "", files: [{ path: "x.ts", role: "r" }] }] },
+    findings: [
+      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
+    ],
+  }) }) };
+  const result = await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id, raw,
+  );
+  assert.equal(JSON.parse(result.reading_plan!).cohorts[0].files[0].class, "substantive");
 });
 
 test("runSynthesize stores impact, verdict, and impact-driven selection", async () => {
@@ -89,7 +116,7 @@ test("runSynthesize stores impact, verdict, and impact-driven selection", async 
   assert.equal(findings[1].selected, false);  // impact overrides the severity rule
 });
 
-test("runSynthesize stores the finalizer's file reading guide", async () => {
+test("runSynthesize degrades a legacy flat files guide into a single-cohort plan", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
   const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
@@ -105,6 +132,9 @@ test("runSynthesize stores the finalizer's file reading guide", async () => {
   assert.deepEqual(JSON.parse(result.file_guide!), [
     { path: "x.ts", role: "Core logic of the change.", walkthrough: "- `run()` drives the retry loop — unbounded, see finding 1." },
   ]);
+  const plan = JSON.parse(result.reading_plan!);
+  assert.equal(plan.cohorts.length, 1);
+  assert.equal(plan.cohorts[0].files[0].class, "substantive"); // legacy entries never auto-collapse
 });
 
 test("runSynthesize feeds past rejected examples into the finalizer only when enabled", async () => {

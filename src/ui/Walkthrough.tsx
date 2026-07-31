@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type TextareaHTMLAttributes } from "react";
-import type { FileGuideEntry, GhConversation, GhInlineThread, PrRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import type { FileGuideEntry, GhConversation, GhInlineThread, PlanFile, PrRecord, ReadingPlan, StoredFinding, UserComment } from "../shared/types.ts";
 import { addComment, getConversation, getDiff, getFileContent, getFindings, listComments, removeComment, replyToConversation, setFindingSelected, updateComment, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { highlightLine, langForPath } from "./highlight.ts";
@@ -17,6 +17,24 @@ function parseGuide(json: string | null): FileGuideEntry[] {
   } catch {
     return [];
   }
+}
+
+// The finalizer's reading plan; old rows that only have the flat file_guide
+// degrade to a single unlabeled cohort where every file gets full treatment
+// (nothing auto-collapses without a real plan behind the classification).
+function parseReadingPlan(pr: PrRecord): ReadingPlan | null {
+  if (pr.reading_plan) {
+    try {
+      const parsed = JSON.parse(pr.reading_plan) as ReadingPlan;
+      if (Array.isArray(parsed?.cohorts) && parsed.cohorts.length > 0) return parsed;
+    } catch {
+      // fall through to the flat guide
+    }
+  }
+  const guide = parseGuide(pr.file_guide);
+  return guide.length > 0
+    ? { cohorts: [{ label: "", why: "", files: guide.map((g) => ({ ...g, class: "substantive" as const })) }] }
+    : null;
 }
 
 const SEV_DOT: Record<string, string> = { blocking: "●", serious: "●", moderate: "○", optional: "○" };
@@ -107,11 +125,11 @@ function buildDiffRows(
   return rows;
 }
 
-/** Order diff files by the finalizer's reading guide, unguided files last in diff order. */
-function orderFiles(files: DiffFile[], guide: FileGuideEntry[]): DiffFile[] {
-  if (guide.length === 0) return files;
-  const rank = new Map(guide.map((g, i) => [g.path, i]));
-  return [...files].sort((a, b) => (rank.get(a.path) ?? 999) - (rank.get(b.path) ?? 999));
+/** Order diff files by the reading plan (cohorts flattened), unplanned files last in diff order. */
+function orderFiles(files: DiffFile[], planFiles: PlanFile[]): DiffFile[] {
+  if (planFiles.length === 0) return files;
+  const rank = new Map(planFiles.map((g, i) => [g.path, i]));
+  return [...files].sort((a, b) => (rank.get(a.path) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER));
 }
 
 function FindingCard({
@@ -169,7 +187,6 @@ function FindingCard({
         )}
         {f.agreement && <span title="both engines flagged this">🤝</span>}
         <span className="f-engine">{f.engine}</span>
-        {f.theme && <span className="wt-theme" title="theme">{f.theme}</span>}
         {!posted && !editing && (
           <button className="btn btn-sm btn-ghost wt-edit-btn" title="Edit before posting" onClick={startEdit}>✎</button>
         )}
@@ -371,6 +388,33 @@ function PrefaceEditor({ value, disabled, onCommit }: { value: string; disabled?
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== value) onCommit(draft); }}
     />
+  );
+}
+
+/**
+ * Collapsed row for a file the plan classifies as skimmable (mechanical /
+ * boilerplate). Collapsed is never hidden: the model's one-line justification
+ * shows in place of the diff, and one click expands the real thing. Files with
+ * findings, comments, or threads never render as this (see `skimmable`).
+ */
+function SkimSection({ file, plan, onOpen }: { file: DiffFile; plan: PlanFile; onOpen: (path: string) => void }) {
+  return (
+    <section data-path={file.path} className="wt-filesection wt-skim">
+      <div
+        className="wt-diff-filehead wt-skim-head"
+        title="Collapsed — the review classified this as needing only a skim. Click to show the full diff."
+        onClick={() => onOpen(file.path)}
+      >
+        {file.status !== "modified" && <span className={`badge wt-status-${file.status}`}>{file.status}</span>}
+        <span className="wt-diff-path">{file.path}</span>
+        <span className={`class-chip class-${plan.class}`}>{plan.class}</span>
+        <span className="wt-skim-meta">
+          <span className="add">+{file.additions}</span> <span className="del">−{file.deletions}</span>
+        </span>
+        <span className="wt-skim-cta">▸ show diff</span>
+      </div>
+      {plan.role && <div className="wt-skim-role"><Md inline>{plan.role}</Md></div>}
+    </section>
   );
 }
 
@@ -661,10 +705,12 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
     return () => window.removeEventListener("keydown", onKey, true);
   });
 
-  const guide = parseGuide(pr.file_guide);
+  const plan = useMemo(() => parseReadingPlan(pr), [pr.reading_plan, pr.file_guide]);
+  const planFiles = useMemo(() => plan?.cohorts.flatMap((c) => c.files) ?? [], [plan]);
+  const planByPath = useMemo(() => new Map(planFiles.map((f) => [f.path, f])), [planFiles]);
   const files = useMemo(
-    () => (diffText === null ? [] : orderFiles(parseUnifiedDiff(diffText), guide)),
-    [diffText, pr.file_guide],
+    () => (diffText === null ? [] : orderFiles(parseUnifiedDiff(diffText), planFiles)),
+    [diffText, planFiles],
   );
 
   // All files render stacked in one scroll; track which one is at the top of
@@ -688,7 +734,7 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   }, [files]);
 
   const current = files.find((f) => f.path === currentPath) ?? files[0] ?? null;
-  const guideOf = (path: string) => guide.find((g) => g.path === path);
+  const planOf = (path: string) => planByPath.get(path);
 
   const findingsByFile = useMemo(() => {
     const m = new Map<string, StoredFinding[]>();
@@ -718,6 +764,62 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
     }
     return m;
   }, [convo.threads]);
+
+  // A file may collapse to a skim row only when the plan tags it low-attention
+  // AND nothing anchored to it demands a look — findings, your comments, or
+  // GitHub threads always force the full diff (evidence beats the model's tag).
+  const skimmable = useCallback(
+    (path: string) => {
+      const p = planByPath.get(path);
+      if (!p || (p.class !== "mechanical" && p.class !== "boilerplate")) return false;
+      return !findingsByFile.has(path) && !commentsByFile.has(path) && !threadsByFile.has(path);
+    },
+    [planByPath, findingsByFile, commentsByFile, threadsByFile],
+  );
+  // Skim files the reviewer explicitly expanded (per session, reset per PR).
+  const [openSkims, setOpenSkims] = useState<Set<string>>(new Set());
+  useEffect(() => setOpenSkims(new Set()), [pr.id]);
+  const openSkim = useCallback((path: string) => setOpenSkims((s) => new Set(s).add(path)), []);
+
+  // Attention stat: changed lines in files needing a real read (crux/substantive
+  // + anything unplanned) vs. the whole diff. Computed from the parsed diff —
+  // the model classifies, it never counts.
+  const attentionStat = useMemo(() => {
+    if (!plan) return null;
+    const lines = (f: DiffFile) => f.additions + f.deletions;
+    const total = files.reduce((n, f) => n + lines(f), 0);
+    const attention = files.reduce((n, f) => {
+      const c = planByPath.get(f.path)?.class;
+      return c === "mechanical" || c === "boilerplate" ? n : n + lines(f);
+    }, 0);
+    return attention < total ? { attention, total } : null;
+  }, [plan, files, planByPath]);
+
+  // Left-rail structure: the plan's cohorts mapped onto files actually present
+  // in the diff, plus a trailing group for anything the plan missed.
+  const railCohorts = useMemo(() => {
+    if (!plan) return [{ label: "", why: "", files }];
+    const byPath = new Map(files.map((f) => [f.path, f]));
+    const used = new Set<string>();
+    const cohorts = plan.cohorts
+      .map((c) => ({
+        label: c.label,
+        why: c.why,
+        files: c.files
+          .map((pf) => {
+            used.add(pf.path);
+            return byPath.get(pf.path);
+          })
+          .filter((x): x is DiffFile => x !== undefined),
+      }))
+      .filter((c) => c.files.length > 0);
+    const leftover = files.filter((f) => !used.has(f.path));
+    if (leftover.length > 0) {
+      cohorts.push({ label: cohorts.some((c) => c.label) ? "Other changes" : "", why: "", files: leftover });
+    }
+    return cohorts;
+  }, [plan, files]);
+  const orderNo = useMemo(() => new Map(files.map((f, i) => [f.path, i + 1])), [files]);
 
   const fileFindings = current ? findingsByFile.get(current.path) ?? NO_FINDINGS : NO_FINDINGS;
   const fileComments = current ? commentsByFile.get(current.path) ?? NO_COMMENTS : NO_COMMENTS;
@@ -921,31 +1023,53 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
       {files.length > 0 && (
         <div className="wt-body">
           <div className="wt-left">
+          {attentionStat && (
+            <div
+              className="wt-attention"
+              title="changed lines in crux/substantive files vs. the whole diff — the rest is collapsed as skimmable (mechanical/boilerplate)"
+            >
+              ~{attentionStat.attention.toLocaleString()} of {attentionStat.total.toLocaleString()} lines need full attention
+            </div>
+          )}
           <div className="wt-files">
-            {files.map((f, i) => {
-              const ffs = findingsByFile.get(f.path) ?? [];
-              const worst = ffs.some((x) => x.severity === "blocking" || x.severity === "serious");
-              const ccount = comments.filter((c) => c.file === f.path).length;
-              return (
-                <div
-                  key={f.path}
-                  className={`wt-file ${current && f.path === current.path ? "selected" : ""}`}
-                  onClick={() => scrollToFile(f.path)}
-                >
-                  <span className="wt-file-order">{guide.length > 0 ? i + 1 : ""}</span>
-                  <span className="wt-file-path" title={f.path}>{f.path}</span>
-                  <span className="wt-file-meta">
-                    <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
-                    {ffs.length > 0 && (
-                      <span className={`wt-file-findings ${worst ? "hot" : ""}`} title={`${ffs.length} finding(s)`}>
-                        {SEV_DOT[worst ? "blocking" : "moderate"]} {ffs.length}
+            {railCohorts.map((cohort, ci) => (
+              <Fragment key={cohort.label || `c${ci}`}>
+                {cohort.label && (
+                  <div className="wt-cohort" title={cohort.why || undefined}>
+                    <span className="wt-cohort-label">{cohort.label}</span>
+                    {cohort.why && <span className="wt-cohort-why">{cohort.why}</span>}
+                  </div>
+                )}
+                {cohort.files.map((f) => {
+                  const ffs = findingsByFile.get(f.path) ?? [];
+                  const worst = ffs.some((x) => x.severity === "blocking" || x.severity === "serious");
+                  const ccount = comments.filter((c) => c.file === f.path).length;
+                  const cls = planByPath.get(f.path)?.class;
+                  const skim = cls === "mechanical" || cls === "boilerplate";
+                  return (
+                    <div
+                      key={f.path}
+                      className={`wt-file ${current && f.path === current.path ? "selected" : ""} ${skim ? "wt-file-skim" : ""}`}
+                      onClick={() => scrollToFile(f.path)}
+                    >
+                      <span className="wt-file-order">{plan ? orderNo.get(f.path) : ""}</span>
+                      <span className="wt-file-path" title={f.path}>{f.path}</span>
+                      <span className="wt-file-meta">
+                        {cls === "crux" && <span className="class-chip class-crux">crux</span>}
+                        {skim && <span className={`class-chip class-${cls}`}>{cls === "mechanical" ? "mech" : "boiler"}</span>}
+                        <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
+                        {ffs.length > 0 && (
+                          <span className={`wt-file-findings ${worst ? "hot" : ""}`} title={`${ffs.length} finding(s)`}>
+                            {SEV_DOT[worst ? "blocking" : "moderate"]} {ffs.length}
+                          </span>
+                        )}
+                        {ccount > 0 && <span className="wt-file-comments" title={`${ccount} of your comment(s)`}>💬{ccount}</span>}
                       </span>
-                    )}
-                    {ccount > 0 && <span className="wt-file-comments" title={`${ccount} of your comment(s)`}>💬{ccount}</span>}
-                  </span>
-                </div>
-              );
-            })}
+                    </div>
+                  );
+                })}
+              </Fragment>
+            ))}
           </div>
           <div className="wt-left-chat">
             <ChatPane pr={pr} stream={chat} startCollapsed />
@@ -954,6 +1078,9 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
 
           <div className="wt-diff" ref={diffScrollRef}>
             {files.map((file) => {
+              if (skimmable(file.path) && !openSkims.has(file.path)) {
+                return <SkimSection key={file.path} file={file} plan={planByPath.get(file.path)!} onOpen={openSkim} />;
+              }
               const fComments = commentsByFile.get(file.path) ?? NO_COMMENTS;
               return (
                 <FileSection
@@ -986,14 +1113,19 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
           </div>
 
           <div className="wt-context">
-            {current && guideOf(current.path) && (
+            {current && planOf(current.path) && (
               <div className="wt-section">
-                <h4>This file</h4>
-                {guideOf(current.path)!.role && (
-                  <div className="wt-file-role"><Md>{guideOf(current.path)!.role}</Md></div>
+                <h4>
+                  This file
+                  {planOf(current.path)!.class !== "substantive" && (
+                    <span className={`class-chip class-${planOf(current.path)!.class}`}>{planOf(current.path)!.class}</span>
+                  )}
+                </h4>
+                {planOf(current.path)!.role && (
+                  <div className="wt-file-role"><Md>{planOf(current.path)!.role}</Md></div>
                 )}
-                {guideOf(current.path)!.walkthrough?.trim() && (
-                  <Md>{guideOf(current.path)!.walkthrough!}</Md>
+                {planOf(current.path)!.walkthrough?.trim() && (
+                  <Md>{planOf(current.path)!.walkthrough!}</Md>
                 )}
               </div>
             )}

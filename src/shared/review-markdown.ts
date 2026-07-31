@@ -1,4 +1,4 @@
-import type { PrRecord, StoredFinding, UserComment } from "./types.ts";
+import type { PrRecord, ReadingPlan, StoredFinding, UserComment } from "./types.ts";
 
 function parseJsonList(json: string | null): string[] {
   if (!json) return [];
@@ -7,6 +7,16 @@ function parseJsonList(json: string | null): string[] {
     return Array.isArray(parsed) ? (parsed as string[]) : [];
   } catch {
     return [];
+  }
+}
+
+function parsePlan(json: string | null): ReadingPlan | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as ReadingPlan;
+    return Array.isArray(parsed?.cohorts) && parsed.cohorts.length > 0 ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -30,8 +40,8 @@ export function buildReviewMarkdown(
   const lines: string[] = [];
   const reasons = parseJsonList(pr.danger_reasons);
   const flags = parseJsonList(pr.danger_flags);
-  const focus = parseJsonList(pr.focus_areas);
   const gaps = parseJsonList(pr.goal_gaps);
+  const plan = parsePlan(pr.reading_plan);
 
   lines.push(`# Code review: ${pr.title ?? `PR #${pr.number}`} (${pr.owner}/${pr.repo}#${pr.number})`);
   lines.push("");
@@ -65,9 +75,14 @@ export function buildReviewMarkdown(
     for (const r of reasons) lines.push(`- ${r}`);
   }
 
-  if (focus.length > 0) {
-    lines.push("", "## Focus areas", "");
-    for (const f of focus) lines.push(`- ${f}`);
+  if (plan) {
+    lines.push("", "## Reading plan", "");
+    for (const c of plan.cohorts) {
+      if (c.label) lines.push(`### ${c.label}`, ...(c.why ? ["", c.why] : []), "");
+      for (const f of c.files) lines.push(`- \`${f.path}\` _(${f.class})_ — ${f.role}`);
+      lines.push("");
+    }
+    while (lines[lines.length - 1] === "") lines.pop();
   }
 
   if (findings.length > 0) {
@@ -79,7 +94,6 @@ export function buildReviewMarkdown(
         f.severity,
         f.engine,
         f.agreement ? "cross-model agreement" : null,
-        f.theme ? `theme: ${f.theme}` : null,
         !f.selected ? "deselected by reviewer" : null,
       ].filter(Boolean).join(" · ");
       lines.push("", `### ${i + 1}. ${loc} — ${f.what}`, "", `_${tags}_`);

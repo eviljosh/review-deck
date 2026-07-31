@@ -36,13 +36,7 @@ export interface TriageResult {
   goalAssessment?: GoalAssessment;// does the diff actually accomplish the goal?
   summary: string;
   danger: DangerRating;
-  focusAreas: string[];
   discussion?: string;
-}
-
-export interface FindingTheme {
-  label: string;
-  summary: string;
 }
 
 /** One entry of the walkthrough reading order: a changed file + its role in the change. */
@@ -50,6 +44,29 @@ export interface FileGuideEntry {
   path: string;
   role: string;         // one sentence, shown in the file header
   walkthrough?: string; // short markdown tour: major functions/classes, purpose, problems found
+}
+
+/**
+ * How much reviewer attention a changed file needs. crux/substantive render as
+ * full diffs; boilerplate/mechanical collapse into skim drawers (still one
+ * click from visible — the tag is advisory, never a hard hide).
+ */
+export type ChangeClass = "crux" | "substantive" | "boilerplate" | "mechanical";
+
+export interface PlanFile extends FileGuideEntry {
+  class: ChangeClass;
+}
+
+/** An ordered conceptual group of files, read foundation-first. */
+export interface PlanCohort {
+  label: string;
+  why: string; // one line: what question reading this cohort answers
+  files: PlanFile[];
+}
+
+/** The finalizer's structured reading plan — supersedes the flat FileGuideEntry[] guide. */
+export interface ReadingPlan {
+  cohorts: PlanCohort[];
 }
 
 /** A reviewer-authored comment anchored to a diff line, merged into the posted review. */
@@ -119,10 +136,10 @@ export interface PrRecord {
   summary: string | null;
   danger_level: DangerLevel | null;
   danger_reasons: string | null; // JSON-encoded string[]
-  focus_areas: string | null;    // JSON-encoded string[]
+  focus_areas: string | null;    // legacy (no longer written): JSON string[] from old triage runs
   danger_flags: string | null;   // JSON-encoded RiskSurface[]
   discussion: string | null;     // markdown summary of existing PR review activity
-  finding_themes: string | null; // JSON-encoded FindingTheme[] (finalizer clusters)
+  finding_themes: string | null; // legacy (no longer written): JSON theme clusters from old runs
   preface: string | null;
   archived_at: string | null;    // set when archived; null = active
   seen_at: string | null;        // last time the user opened it; drives unseen marks
@@ -138,7 +155,8 @@ export interface PrRecord {
   goal_explanation: string | null;
   goal_gaps: string | null;      // JSON-encoded string[]
   review_verdict: string | null; // finalizer: 1–2 sentence bottom line for the reviewer
-  file_guide: string | null;     // JSON-encoded FileGuideEntry[] — suggested reading order
+  file_guide: string | null;     // JSON-encoded FileGuideEntry[] — flat reading order (kept for old rows)
+  reading_plan: string | null;   // JSON-encoded ReadingPlan — cohorts + per-file attention class
   prior_findings: string | null; // JSON snapshot of the last POSTED review's findings, taken at re-run
   claude_transport: string | null; // provenance: Claude transport used by the most recent run (e.g. "sdk", "cli (stored login)")
   created_at: string;
@@ -181,7 +199,6 @@ export const triageResultSchema = z.object({
   goalAssessment: goalAssessmentSchema.optional(),
   summary: z.string(),
   danger: dangerRatingSchema,
-  focusAreas: z.array(z.string()),
   discussion: z.string().optional(),
 });
 

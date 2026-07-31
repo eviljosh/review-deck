@@ -110,7 +110,7 @@ test("migrate is idempotent — re-running does not throw or duplicate columns",
   const db = openDb(":memory:"); // migrate already ran once inside openDb
   assert.doesNotThrow(() => { migrate(db); migrate(db); }); // re-runs are safe
   const cols = (db.prepare("PRAGMA table_info(prs)").all() as { name: string }[]).map((c) => c.name);
-  for (const c of ["summary", "danger_level", "danger_reasons", "focus_areas", "danger_flags"]) {
+  for (const c of ["summary", "danger_level", "danger_reasons", "focus_areas", "danger_flags", "reading_plan"]) {
     assert.ok(cols.includes(c), `missing column ${c}`);
   }
 });

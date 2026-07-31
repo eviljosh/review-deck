@@ -32,13 +32,12 @@ function seedPrepared(db: ReturnType<typeof openDb>) {
   return updatePr(db, pr.id, { stage: "triage", status: "pending", worktree_path: "/wt" });
 }
 
-test("runTriage persists summary/danger/focus and sets status done", async () => {
+test("runTriage persists summary/danger and sets status done", async () => {
   const db = openDb(":memory:");
   const pr = seedPrepared(db);
   const good = JSON.stringify({
     summary: "Adds x.",
     danger: { level: "medium", reasons: ["shared util"], flags: ["api_contract"] },
-    focusAreas: ["error handling"],
   });
   const updates: string[] = [];
   const logs: string[] = [];
@@ -54,8 +53,8 @@ test("runTriage persists summary/danger/focus and sets status done", async () =>
   assert.equal(result.summary, "Adds x.");
   assert.equal(result.danger_level, "medium");
   assert.deepEqual(JSON.parse(result.danger_reasons!), ["shared util"]);
-  assert.deepEqual(JSON.parse(result.focus_areas!), ["error handling"]);
   assert.deepEqual(JSON.parse(result.danger_flags!), ["api_contract"]);
+  assert.equal(result.focus_areas, null); // deprecated — no longer written
   assert.ok(updates.includes("running"));
   assert.ok(logs.includes("working"));
 });

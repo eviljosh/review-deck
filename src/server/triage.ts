@@ -101,7 +101,6 @@ export async function runTriage(deps: TriageDeps, prId: number): Promise<PrRecor
       danger_level: parsed.value.danger.level,
       danger_reasons: JSON.stringify(parsed.value.danger.reasons),
       danger_flags: JSON.stringify(parsed.value.danger.flags),
-      focus_areas: JSON.stringify(parsed.value.focusAreas),
       discussion: parsed.value.discussion?.trim() ? parsed.value.discussion : null,
     });
     onUpdate(done);

@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Exec } from "./exec.ts";
 import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts";
-import type { PrRecord, Finding } from "../shared/types.ts";
+import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
@@ -11,10 +11,21 @@ import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
 
+const planFileSchema = z.object({
+  path: z.string(),
+  // Tolerate a missing class (normalized to "substantive" — the safe default).
+  class: z.enum(["crux", "substantive", "boilerplate", "mechanical"]).optional(),
+  role: z.string(),
+  walkthrough: z.string().optional(),
+});
+
 const finalSchema = z.object({
   verdict: z.string().optional(),
+  plan: z.object({
+    cohorts: z.array(z.object({ label: z.string(), why: z.string().optional(), files: z.array(planFileSchema) })),
+  }).optional(),
+  // Legacy flat reading guide — accepted as a fallback if the model returns the old shape.
   files: z.array(z.object({ path: z.string(), role: z.string(), walkthrough: z.string().optional() })).optional(),
-  themes: z.array(z.object({ label: z.string(), summary: z.string() })).optional(),
   findings: z.array(z.object({
     dimension: z.string(),
     severity: z.enum(["blocking", "serious", "moderate", "optional"]),
@@ -25,7 +36,6 @@ const finalSchema = z.object({
     what: z.string(),
     why: z.string(),
     suggestedFix: z.string(),
-    theme: z.string().optional(),
     sources: z.array(z.string()),
     agreement: z.boolean(),
   })),
@@ -111,16 +121,30 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       return degraded;
     }
 
-    // Keep only theme labels that findings actually reference.
-    const usedThemes = new Set(parsed.value.findings.map((f) => f.theme?.trim()).filter(Boolean) as string[]);
-    const themes = (parsed.value.themes ?? []).filter((t) => usedThemes.has(t.label.trim()));
+    // The reading plan, normalized: missing classes default to "substantive"
+    // (the safe tag — never auto-collapse what the model didn't classify). The
+    // legacy flat "files" shape degrades to a single unlabeled cohort.
+    const cohorts = (parsed.value.plan?.cohorts ?? []).filter((c) => c.files.length > 0);
+    const plan: ReadingPlan | null = cohorts.length
+      ? {
+          cohorts: cohorts.map((c) => ({
+            label: c.label,
+            why: c.why ?? "",
+            files: c.files.map((f) => ({ path: f.path, class: f.class ?? "substantive", role: f.role, ...(f.walkthrough?.trim() ? { walkthrough: f.walkthrough } : {}) })),
+          })),
+        }
+      : parsed.value.files?.length
+        ? { cohorts: [{ label: "", why: "", files: parsed.value.files.map((f) => ({ ...f, class: "substantive" as const })) }] }
+        : null;
+    // Flat guide kept in sync for anything still reading file_guide (old UI sessions, copy-review).
+    const flatGuide = plan?.cohorts.flatMap((c) => c.files.map(({ path, role, walkthrough }) => ({ path, role, ...(walkthrough ? { walkthrough } : {}) }))) ?? [];
 
     const finalFindings = parsed.value.findings.map((f) => {
       const agreement = f.agreement || f.sources.length >= 2;
       return {
         dimension: f.dimension, severity: f.severity, file: f.file, line: f.line, side: f.side,
         what: f.what, why: f.why, suggestedFix: f.suggestedFix,
-        theme: f.theme?.trim() ? f.theme.trim() : null,
+        theme: null,
         impact: f.impact ?? null,
         engine: f.sources.length ? f.sources.join("+") : "final",
         agreement,
@@ -135,8 +159,8 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
     const done = updatePr(db, prId, {
       stage: "ready", status: "done",
       review_verdict: parsed.value.verdict?.trim() ? parsed.value.verdict : null,
-      finding_themes: themes.length ? JSON.stringify(themes) : null,
-      file_guide: parsed.value.files?.length ? JSON.stringify(parsed.value.files) : null,
+      reading_plan: plan ? JSON.stringify(plan) : null,
+      file_guide: flatGuide.length ? JSON.stringify(flatGuide) : null,
     });
     onUpdate(done);
     return done;

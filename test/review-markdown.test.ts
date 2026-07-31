@@ -17,7 +17,14 @@ function seedReviewed() {
     danger_level: "medium",
     danger_reasons: JSON.stringify(["touches a shared util"]),
     danger_flags: JSON.stringify(["api_contract"]),
-    focus_areas: JSON.stringify(["verify backoff cap"]),
+    reading_plan: JSON.stringify({ cohorts: [
+      { label: "Core logic", why: "Where the behavior changes.", files: [
+        { path: "src/retry.ts", class: "crux", role: "The retry wrapper itself." },
+      ] },
+      { label: "Mechanical", why: "", files: [
+        { path: "src/index.ts", class: "mechanical", role: "Re-export only." },
+      ] },
+    ] }),
   });
   insertFinding(db, pr.id, {
     engine: "claude+codex", dimension: "correctness", severity: "serious", file: "src/retry.ts", line: 12,
@@ -43,6 +50,10 @@ test("buildReviewMarkdown includes header, goal+verdict+gaps, bottom line, ratin
   assert.match(md, /unbounded retry loop/);
   assert.match(md, /## Why the medium rating/);
   assert.match(md, /touches a shared util/);
+  assert.match(md, /## Reading plan/);
+  assert.match(md, /### Core logic/);
+  assert.match(md, /`src\/retry\.ts` _\(crux\)_ — The retry wrapper itself\./);
+  assert.match(md, /`src\/index\.ts` _\(mechanical\)_ — Re-export only\./);
   assert.match(md, /## Findings \(2\)/);
   assert.match(md, /`src\/retry\.ts:12` — retry loop has no upper bound/);
   assert.match(md, /impact: high · serious · claude\+codex · cross-model agreement/);

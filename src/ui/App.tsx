@@ -4,7 +4,7 @@ import { createPrs, markSeen, purgeArchived } from "./api.ts";
 import { useLivePrs } from "./useLivePrs.ts";
 import { PrDetail } from "./PrDetail.tsx";
 import { Settings } from "./Settings.tsx";
-import { DANGER_RANK, DangerBadge, DiffStat, StageBadge, StatusBadges, StatusPill, dangerClass, isUnseen } from "./bits.tsx";
+import { DANGER_RANK, DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill, dangerClass, isUnseen } from "./bits.tsx";
 
 type SortKey = "danger" | "recent" | "repo";
 
@@ -24,6 +24,7 @@ function PrCard({ pr, selected, onSelect }: { pr: PrRecord; selected: boolean; o
         {pr.owner}/{pr.repo}
         {pr.author ? ` · ${pr.author}` : ""} · <DiffStat pr={pr} />
       </div>
+      {pr.headline && <div className="pr-headline"><Md inline>{pr.headline}</Md></div>}
       <div className="pr-tags">
         <DangerBadge level={pr.danger_level} />
         <StageBadge stage={pr.stage} />

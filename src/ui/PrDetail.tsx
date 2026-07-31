@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FindingTheme, PrRecord, RunRecord, StoredFinding } from "../shared/types.ts";
+import type { PrRecord, RunRecord, StoredFinding } from "../shared/types.ts";
 import {
   archivePr,
   cancelPr,
@@ -32,17 +32,6 @@ function parseList(json: string | null): string[] {
   }
 }
 
-function parseThemes(json: string | null): FindingTheme[] {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as FindingTheme[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-const SEV_RANK: Record<string, number> = { blocking: 0, serious: 1, moderate: 2, optional: 3 };
 // Goal-aware impact (when the finalizer scored it) decides what shows unfolded;
 // severity is the fallback for findings without one.
 const isMajor = (f: StoredFinding) =>
@@ -54,29 +43,6 @@ const GOAL_VERDICT_LABEL: Record<string, { label: string; cls: string }> = {
   "does-not": { label: "misses goal", cls: "b-bad" },
   unclear: { label: "goal unclear", cls: "b-neutral" },
 };
-
-interface FindingGroup {
-  theme: FindingTheme | null;
-  items: StoredFinding[];
-}
-
-// Cluster findings under their finalizer-assigned themes (worst-severity first),
-// with anything unthemed collected into a trailing "Other" group.
-function groupFindings(findings: StoredFinding[], themes: FindingTheme[]): FindingGroup[] {
-  if (themes.length === 0) return [{ theme: null, items: findings }];
-  const byLabel = new Map<string, StoredFinding[]>(themes.map((t) => [t.label, []]));
-  const other: StoredFinding[] = [];
-  for (const f of findings) {
-    if (f.theme && byLabel.has(f.theme)) byLabel.get(f.theme)!.push(f);
-    else other.push(f);
-  }
-  const worst = (items: StoredFinding[]) => Math.min(...items.map((f) => SEV_RANK[f.severity] ?? 9));
-  const groups: FindingGroup[] = themes
-    .map((t) => ({ theme: t, items: byLabel.get(t.label)! }))
-    .filter((g) => g.items.length > 0);
-  if (other.length) groups.push({ theme: { label: "Other", summary: "" }, items: other });
-  return groups.sort((a, b) => worst(a.items) - worst(b.items));
-}
 
 function toIso(sqliteDatetime: string): string {
   // sqlite's datetime('now','subsec') yields "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no offset).
@@ -184,7 +150,6 @@ export function PrDetail({
   onClose: () => void;
 }) {
   const reasons = parseList(pr.danger_reasons);
-  const focus = parseList(pr.focus_areas);
   const flags = parseList(pr.danger_flags);
   const goalGaps = parseList(pr.goal_gaps);
   const goalVerdict = pr.goal_verdict ? GOAL_VERDICT_LABEL[pr.goal_verdict] : null;
@@ -261,8 +226,6 @@ export function PrDetail({
   }
   const selectedCount = findings.filter((f) => f.selected).length;
 
-  const themes = parseThemes(pr.finding_themes);
-  const groups = groupFindings(findings, themes);
   const toggleFinding = (f: StoredFinding, checked: boolean) => {
     setFindingSelected(pr.id, f.id, checked);
     setFindings((fs) => fs.map((x) => (x.id === f.id ? { ...x, selected: checked } : x)));
@@ -382,9 +345,6 @@ export function PrDetail({
               {pr.error}
             </div>
           )}
-          {pr.headline && (
-            <div className="headline"><Md inline>{pr.headline}</Md></div>
-          )}
         </div>
 
         {flags.length > 0 && (
@@ -460,22 +420,6 @@ export function PrDetail({
           </div>
         )}
 
-        {focus.length > 0 && (
-          <div className="section">
-            <details className="fold fold-cta">
-              <summary>
-                <span className="fold-title">Focus your review on</span>
-                <span className="fold-hint">{focus.length} area{focus.length === 1 ? "" : "s"} · click to view</span>
-              </summary>
-              <ul className="fold-body">
-                {focus.map((f, i) => (
-                  <li key={i}><Md inline>{f}</Md></li>
-                ))}
-              </ul>
-            </details>
-          </div>
-        )}
-
         {showGate && (
           <div className="section">
             <h3>Preface</h3>
@@ -507,20 +451,7 @@ export function PrDetail({
                 </span>
               )}
             </h3>
-            {groups.length === 1 && groups[0].theme === null ? (
-              <FindingList items={groups[0].items} posted={posted} onToggle={toggleFinding} />
-            ) : (
-              groups.map((g) => (
-                <div key={g.theme!.label} className="theme-group">
-                  <div className="theme-head">
-                    <span className="theme-label">{g.theme!.label}</span>
-                    <span className="theme-count">{g.items.length}</span>
-                  </div>
-                  {g.theme!.summary && <div className="theme-summary"><Md inline>{g.theme!.summary}</Md></div>}
-                  <FindingList items={g.items} posted={posted} onToggle={toggleFinding} />
-                </div>
-              ))
-            )}
+            <FindingList items={findings} posted={posted} onToggle={toggleFinding} />
           </div>
         )}
 

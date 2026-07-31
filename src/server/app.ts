@@ -158,7 +158,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         summary: null, headline: null, danger_level: null, danger_reasons: null,
         focus_areas: null, danger_flags: null, finding_themes: null, discussion: null,
         goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
-        review_verdict: null, file_guide: null,
+        review_verdict: null, file_guide: null, reading_plan: null,
       });
       hub.broadcast({ type: "findings_updated", prId: id });
     }

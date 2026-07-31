@@ -11,7 +11,8 @@ test("buildTriagePrompt embeds rubric, JSON contract, metadata, and diff", () =>
   assert.match(system, /blast radius/i);
   assert.match(system, /db_migration/);
   assert.match(system, /summary/);
-  assert.match(system, /focusAreas/);
+  // focusAreas was deprecated in favor of the finalizer's reading plan
+  assert.doesNotMatch(system, /focusAreas/);
   // metadata + diff live in the user prompt
   assert.match(prompt, /Add retry/);
   assert.match(prompt, /octocat/);
@@ -45,10 +46,18 @@ test("buildTriagePrompt asks for a headline and embeds PR body + Linear context"
   assert.match(prompt, /ENG-42/);
 });
 
-test("buildFinalizerPrompt asks for themes and a per-finding theme", () => {
+test("buildFinalizerPrompt asks for a cohort reading plan with attention classes", () => {
   const { system } = buildFinalizerPrompt([]);
-  assert.match(system, /themes/i);
-  assert.match(system, /"theme": string/);
+  assert.match(system, /"plan"/);
+  assert.match(system, /cohorts/i);
+  assert.match(system, /"class": "crux"\|"substantive"\|"boilerplate"\|"mechanical"/);
+  // conservative-classification guardrail
+  assert.match(system, /never mechanical/i);
+  // every changed file must appear in the plan
+  assert.match(system, /EVERY changed file/i);
+  // themes were deprecated in favor of cohorts
+  assert.doesNotMatch(system, /"themes"/);
+  assert.doesNotMatch(system, /"theme": string/);
 });
 
 test("every review/triage/finalizer prompt carries the prompt-injection guard", () => {

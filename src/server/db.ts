@@ -132,6 +132,7 @@ const NEW_PR_COLUMNS: [string, string][] = [
   ["goal_gaps", "TEXT"],
   ["review_verdict", "TEXT"],
   ["file_guide", "TEXT"],
+  ["reading_plan", "TEXT"],
   ["prior_findings", "TEXT"],
   ["claude_transport", "TEXT"],
 ];
@@ -294,7 +295,7 @@ const PR_COLUMNS = new Set([
   "pr_state", "mergeable", "review_decision", "checks",
   "head_sha", "base_sha", "latest_sha",
   "goal", "goal_verdict", "goal_explanation", "goal_gaps", "review_verdict",
-  "file_guide", "prior_findings", "claude_transport",
+  "file_guide", "reading_plan", "prior_findings", "claude_transport",
 ]);
 
 export function updatePr(

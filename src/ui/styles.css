@@ -276,6 +276,13 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
   margin-top: 3px;
 }
+.pr-card .pr-headline {
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent);
+}
 .pr-card .pr-tags {
   display: flex;
   align-items: center;
@@ -458,15 +465,6 @@ a:hover { text-decoration: underline; }
 
 .tagrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
-.headline {
-  margin-top: 12px;
-  font-size: 15px;
-  line-height: 1.45;
-  font-weight: 500;
-  padding-left: 12px;
-  border-left: 3px solid var(--accent);
-}
-
 /* collapsible disclosure */
 .fold { margin: 0; }
 .fold > summary {
@@ -489,23 +487,6 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 .fold-body { padding-top: 6px; }
-
-/* theme groups */
-.theme-group {
-  margin-bottom: 16px;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
-}
-.theme-head { display: flex; align-items: center; gap: 8px; }
-.theme-label { font-weight: 600; font-size: 13.5px; }
-.theme-count {
-  font-size: 11px;
-  background: var(--surface-subtle);
-  color: var(--text-muted);
-  border-radius: 999px;
-  padding: 1px 7px;
-}
-.theme-summary { color: var(--text-muted); font-size: 13px; margin: 2px 0 8px; }
 
 .error-banner {
   background: var(--red-bg);
@@ -881,7 +862,6 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-finding.sev-blocking, .wt-finding.sev-serious { border-left-color: var(--red); }
 .wt-finding.sev-moderate { border-left-color: var(--amber); }
 .wt-finding.sev-optional { border-left-color: var(--border); }
-.wt-theme { font-size: 11px; color: var(--text-muted); font-style: italic; }
 
 .wt-filesection { border-bottom: 2px solid var(--border); }
 .wt-file-role {
@@ -890,6 +870,45 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
   margin-bottom: 6px;
 }
 .wt-selcount { margin-left: 12px; color: var(--text-muted); font-size: 12px; }
+.wt-attention {
+  flex-shrink: 0;
+  color: var(--accent); font-size: 12px; font-weight: 500;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* reading-plan cohorts in the left rail */
+.wt-cohort { padding: 8px 8px 2px; }
+.wt-cohort-label {
+  display: block;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.wt-cohort-why { display: block; font-size: 11px; color: var(--text-muted); font-style: italic; margin-top: 1px; }
+.wt-file-skim { opacity: 0.65; }
+.wt-file-skim:hover, .wt-file-skim.selected { opacity: 1; }
+
+/* attention-class chips (crux / substantive / boilerplate / mechanical) */
+.class-chip {
+  font-size: 10px; font-family: var(--sans); font-weight: 600;
+  border-radius: 999px; padding: 0 6px; line-height: 1.5;
+  background: var(--surface-subtle); color: var(--text-muted);
+  text-transform: lowercase; white-space: nowrap;
+}
+.class-chip.class-crux { background: var(--amber-bg); color: var(--amber); }
+h4 .class-chip { margin-left: 6px; vertical-align: middle; }
+
+/* collapsed skim row for mechanical/boilerplate files */
+.wt-skim .wt-skim-head { cursor: pointer; position: static; }
+.wt-skim .wt-skim-head:hover { background: var(--accent-soft); }
+.wt-skim-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-left: auto; }
+.wt-skim-cta { color: var(--accent); font-size: 11px; white-space: nowrap; }
+.wt-skim-role {
+  color: var(--text-muted); font-size: 12.5px; font-style: italic;
+  padding: 5px 10px 7px;
+}
 
 /* Discussion panel: dropdown under the header for PR-level comments and
    threads with no diff anchor. */
