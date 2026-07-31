@@ -104,6 +104,19 @@ test("buildFinalizerPrompt asks for per-finding source engines", () => {
   assert.match(system, /which engines|source engine/i);
 });
 
+test("buildTriagePrompt asks for an optional delta flow diagram", () => {
+  const { system } = buildTriagePrompt(
+    { title: "T", author: "u", additions: 1, deletions: 0, changedFiles: 1 },
+    "d",
+  );
+  assert.match(system, /flowDelta/);
+  assert.match(system, /TOPOLOGY/);
+  assert.match(system, /classDef added/);
+  assert.match(system, /classDef removed/);
+  // null-by-default framing — most PRs need no diagram
+  assert.match(system, /null for MOST PRs/i);
+});
+
 test("buildTriagePrompt asks for goal and goalAssessment", () => {
   const { system } = buildTriagePrompt(
     { title: "T", author: "u", additions: 1, deletions: 0, changedFiles: 1 },

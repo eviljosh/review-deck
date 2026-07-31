@@ -6,6 +6,7 @@ import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
 import { ChatPane } from "./ChatPane.tsx";
+import { FlowDelta, parseFlowDelta } from "./FlowDelta.tsx";
 import { PostControls, usePreface } from "./PostControls.tsx";
 import type { ChatStream } from "./useLivePrs.ts";
 
@@ -708,6 +709,10 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
 
   // The Discussion panel: PR-level comments plus threads with no diff anchor.
   const [discussionOpen, setDiscussionOpen] = useState(false);
+  // The Map panel: triage's delta flow diagram — the mental-model anchor the
+  // walkthrough steps hang off.
+  const flow = useMemo(() => parseFlowDelta(pr), [pr.flow_delta]);
+  const [mapOpen, setMapOpen] = useState(false);
 
   // Capture-phase Escape: close the discussion panel if open, else the
   // walkthrough — without letting the app-level handler also close the whole
@@ -718,7 +723,8 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (e.key === "Escape") {
         e.stopPropagation();
-        if (discussionOpen) setDiscussionOpen(false);
+        if (mapOpen) setMapOpen(false);
+        else if (discussionOpen) setDiscussionOpen(false);
         else onClose();
       }
     }
@@ -976,6 +982,15 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
           <span className="wt-selcount">{selectedCount} finding{selectedCount === 1 ? "" : "s"} selected</span>
         </div>
         <div className="wt-header-right">
+          {flow && (
+            <button
+              className={`btn btn-sm ${mapOpen ? "btn-active" : ""}`}
+              title="The major flow this PR changes, before/after in one picture"
+              onClick={() => setMapOpen((s) => !s)}
+            >
+              🗺 Map
+            </button>
+          )}
           <button
             className={`btn btn-sm ${discussionOpen ? "btn-active" : ""} ${unread > 0 ? "wt-unread" : ""}`}
             title={unread > 0
@@ -1016,6 +1031,18 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
           <label>Top-level review comment <span className="wt-note-hint">(leads the posted review; saved when you click away)</span>
             <PrefaceEditor value={preface} disabled={posted} onCommit={(v) => { setPreface(v); persistPreface(v); }} />
           </label>
+        </div>
+      )}
+
+      {mapOpen && flow && (
+        <div className="wt-discussion wt-map">
+          <div className="wt-discussion-head">
+            <h4>Flow delta</h4>
+            <button className="btn btn-sm btn-ghost" onClick={() => setMapOpen(false)}>✕</button>
+          </div>
+          <div className="wt-discussion-body">
+            <FlowDelta flow={flow} />
+          </div>
         </div>
       )}
 

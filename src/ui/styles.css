@@ -901,6 +901,18 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-progress-fill { height: 100%; background: var(--green); transition: width 0.2s ease; }
 .wt-progress-label { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
 
+/* delta flow diagram (triage's before/after picture) */
+.flow-delta-svg { overflow-x: auto; }
+.flow-delta-svg svg { max-width: 100%; height: auto; }
+.flow-delta-caption { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
+.flow-delta-legend {
+  display: flex; gap: 14px; margin-top: 6px;
+  font-size: 11px; color: var(--text-muted);
+}
+.flow-legend-added { color: var(--green); }
+.flow-legend-removed { color: var(--red); }
+.wt-map .wt-discussion-body { padding: 10px 14px; }
+
 /* ripple note: out-of-diff impact, context pane */
 .wt-ripple {
   margin-top: 8px;

@@ -16,6 +16,7 @@ import {
   unarchivePr,
 } from "./api.ts";
 import { DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill } from "./bits.tsx";
+import { FlowDelta, parseFlowDelta } from "./FlowDelta.tsx";
 import { PostControls, usePreface } from "./PostControls.tsx";
 import { Walkthrough } from "./Walkthrough.tsx";
 import { ChatPane } from "./ChatPane.tsx";
@@ -152,6 +153,7 @@ export function PrDetail({
   const reasons = parseList(pr.danger_reasons);
   const flags = parseList(pr.danger_flags);
   const goalGaps = parseList(pr.goal_gaps);
+  const flow = parseFlowDelta(pr);
   const goalVerdict = pr.goal_verdict ? GOAL_VERDICT_LABEL[pr.goal_verdict] : null;
 
   const [findings, setFindings] = useState<StoredFinding[]>([]);
@@ -387,6 +389,13 @@ export function PrDetail({
                 </ul>
               </div>
             )}
+          </div>
+        )}
+
+        {flow && (
+          <div className="section">
+            <h3>🗺 Flow delta</h3>
+            <FlowDelta flow={flow} />
           </div>
         )}
 

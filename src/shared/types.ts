@@ -30,6 +30,17 @@ export interface GoalAssessment {
   gaps?: string[]; // promised-but-missing behavior, or notable out-of-scope changes
 }
 
+/**
+ * A delta flow diagram: ONE small Mermaid picture of the major code/data flow
+ * with the PR's change overlaid (added paths green, removed paths red-dashed).
+ * Only produced when the PR changes the flow's topology — null for
+ * broad-but-shallow changes.
+ */
+export interface FlowDelta {
+  mermaid: string;
+  caption: string; // 1–2 sentences: what the flow did before vs. now
+}
+
 export interface TriageResult {
   headline?: string;
   goal?: string;                  // the problem being solved / functionality added
@@ -37,6 +48,7 @@ export interface TriageResult {
   summary: string;
   danger: DangerRating;
   discussion?: string;
+  flowDelta?: FlowDelta | null;
 }
 
 /** One entry of the walkthrough reading order: a changed file + its role in the change. */
@@ -160,6 +172,7 @@ export interface PrRecord {
   file_guide: string | null;     // JSON-encoded FileGuideEntry[] — flat reading order (kept for old rows)
   reading_plan: string | null;   // JSON-encoded ReadingPlan — cohorts + per-file attention class
   reviewed_files: string | null; // JSON-encoded string[] — files the reviewer marked done in the walkthrough
+  flow_delta: string | null;     // JSON-encoded FlowDelta — triage's before/after flow diagram (null: no topology change)
   prior_findings: string | null; // JSON snapshot of the last POSTED review's findings, taken at re-run
   claude_transport: string | null; // provenance: Claude transport used by the most recent run (e.g. "sdk", "cli (stored login)")
   created_at: string;
@@ -203,6 +216,7 @@ export const triageResultSchema = z.object({
   summary: z.string(),
   danger: dangerRatingSchema,
   discussion: z.string().optional(),
+  flowDelta: z.object({ mermaid: z.string(), caption: z.string().optional() }).nullable().optional(),
 });
 
 export const createPrBodySchema = z.object({

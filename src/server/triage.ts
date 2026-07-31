@@ -102,6 +102,9 @@ export async function runTriage(deps: TriageDeps, prId: number): Promise<PrRecor
       danger_reasons: JSON.stringify(parsed.value.danger.reasons),
       danger_flags: JSON.stringify(parsed.value.danger.flags),
       discussion: parsed.value.discussion?.trim() ? parsed.value.discussion : null,
+      flow_delta: parsed.value.flowDelta?.mermaid?.trim()
+        ? JSON.stringify({ mermaid: parsed.value.flowDelta.mermaid, caption: parsed.value.flowDelta.caption?.trim() ?? "" })
+        : null,
     });
     onUpdate(done);
     return done;

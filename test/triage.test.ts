@@ -92,6 +92,31 @@ test("runTriage tolerates a response without goal fields (older prompt shape)", 
   assert.equal(result.goal_verdict, null);
 });
 
+test("runTriage persists flowDelta when present, null when absent or empty", async () => {
+  const db = openDb(":memory:");
+  const pr = seedPrepared(db);
+  const withFlow = JSON.stringify({
+    summary: "s",
+    danger: { level: "low", reasons: [], flags: [] },
+    flowDelta: { mermaid: "flowchart LR\n  A --> B", caption: "B now handles retries." },
+  });
+  const result = await runTriage(
+    { db, exec: ghExec(), engine: engineReturning(withFlow), dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id,
+  );
+  assert.deepEqual(JSON.parse(result.flow_delta!), { mermaid: "flowchart LR\n  A --> B", caption: "B now handles retries." });
+
+  // explicit null → stored null
+  const db2 = openDb(":memory:");
+  const prNull = seedPrepared(db2);
+  const noFlow = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] }, flowDelta: null });
+  const resultNull = await runTriage(
+    { db: db2, exec: ghExec(), engine: engineReturning(noFlow), dataDir: freshDataDir(), onUpdate: () => {} },
+    prNull.id,
+  );
+  assert.equal(resultNull.flow_delta, null);
+});
+
 test("runTriage marks degraded (not failed) when the model returns non-JSON", async () => {
   const db = openDb(":memory:");
   const pr = seedPrepared(db);
