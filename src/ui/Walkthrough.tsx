@@ -447,7 +447,9 @@ const FileSection = memo(function FileSection({
   composerLine,
   editingId,
   reviewed,
+  collapsible,
   onToggleReviewed,
+  onCollapse,
   onExpand,
   onOpenComposer,
   onCloseComposer,
@@ -472,7 +474,10 @@ const FileSection = memo(function FileSection({
   composerLine: number | null;
   editingId: number | null;
   reviewed: boolean;
+  /** True for skim-class files opened from their skim row — shows the collapse-again control. */
+  collapsible: boolean;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
+  onCollapse: (path: string) => void;
   onExpand: (path: string, row: { dir: "up" | "tail"; key: string }) => void;
   onOpenComposer: (file: string, line: number) => void;
   onCloseComposer: () => void;
@@ -515,6 +520,11 @@ const FileSection = memo(function FileSection({
         >
           {reviewed ? "✓ reviewed" : "✓ mark reviewed"}
         </button>
+        {collapsible && (
+          <button className="wt-reviewed-btn" title="Collapse back to a skim row" onClick={() => onCollapse(file.path)}>
+            ⌃ collapse
+          </button>
+        )}
       </div>
       <table className="difftable">
         <tbody>
@@ -807,6 +817,11 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   const [openSkims, setOpenSkims] = useState<Set<string>>(new Set());
   useEffect(() => setOpenSkims(new Set()), [pr.id]);
   const openSkim = useCallback((path: string) => setOpenSkims((s) => new Set(s).add(path)), []);
+  const closeSkim = useCallback((path: string) => setOpenSkims((s) => {
+    const n = new Set(s);
+    n.delete(path);
+    return n;
+  }), []);
 
   // Per-file done state — persisted server-side so multi-day reviews keep
   // their place. Optimistic local set; the server broadcast confirms it.
@@ -1163,7 +1178,8 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
 
           <div className="wt-diff" ref={diffScrollRef}>
             {files.map((file) => {
-              if (skimmable(file.path) && !openSkims.has(file.path)) {
+              const skim = skimmable(file.path);
+              if (skim && !openSkims.has(file.path)) {
                 return <SkimSection key={file.path} file={file} plan={planByPath.get(file.path)!} onOpen={openSkim} />;
               }
               const fComments = commentsByFile.get(file.path) ?? NO_COMMENTS;
@@ -1182,7 +1198,9 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                   composerLine={composer !== null && composer.file === file.path ? composer.line : null}
                   editingId={editingId !== null && fComments.some((c) => c.id === editingId) ? editingId : null}
                   reviewed={reviewed.has(file.path)}
+                  collapsible={skim}
                   onToggleReviewed={toggleReviewed}
+                  onCollapse={closeSkim}
                   onExpand={expand}
                   onOpenComposer={openComposer}
                   onCloseComposer={closeComposer}

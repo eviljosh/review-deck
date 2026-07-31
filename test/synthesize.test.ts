@@ -74,6 +74,43 @@ test("runSynthesize persists the cohort reading plan and a flattened file_guide"
   assert.deepEqual(JSON.parse(result.file_guide!).map((f: { path: string }) => f.path), ["x.ts", "y.ts"]);
 });
 
+test("runSynthesize logs a coverage warning when the plan misses or invents files", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  // DIFF changes x.ts only; the plan omits it and names a file outside the diff.
+  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
+    plan: { cohorts: [{ label: "All", why: "", files: [{ path: "other.ts", class: "substantive", role: "r" }] }] },
+    findings: [
+      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
+    ],
+  }) }) };
+  const logs: string[] = [];
+  await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {}, onLog: (_id, _stage, c) => logs.push(c) },
+    pr.id, raw,
+  );
+  const warning = logs.find((l) => l.includes("plan coverage gap"));
+  assert.ok(warning, logs.join(""));
+  assert.match(warning!, /missing from plan: x\.ts/);
+  assert.match(warning!, /not in diff: other\.ts/);
+});
+
+test("runSynthesize logs when the finalizer returned no reading plan at all", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
+    findings: [
+      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
+    ],
+  }) }) };
+  const logs: string[] = [];
+  await runSynthesize(
+    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {}, onLog: (_id, _stage, c) => logs.push(c) },
+    pr.id, raw,
+  );
+  assert.ok(logs.some((l) => l.includes("no reading plan returned")), logs.join(""));
+});
+
 test("runSynthesize defaults a missing class to substantive (never auto-collapse unclassified)", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);

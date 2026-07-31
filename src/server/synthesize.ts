@@ -59,6 +59,29 @@ export interface SynthesizeDeps {
   effort?: EffortLevel;
 }
 
+// File paths changed by a unified diff (new-side names).
+function diffPaths(diff: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of diff.matchAll(/^diff --git a\/.* b\/(.+)$/gm)) out.add(m[1]);
+  return out;
+}
+
+// Overload telemetry: "include EVERY changed file" is the first instruction a
+// model drops when the finalizer is asked for too much in one response, and
+// it's mechanically checkable. A logged gap here is the signal to consider
+// splitting the plan into its own stage.
+function planCoverageReport(plan: ReadingPlan, diff: string): string | null {
+  const changed = diffPaths(diff);
+  const planned = new Set(plan.cohorts.flatMap((c) => c.files.map((f) => f.path)));
+  const missing = [...changed].filter((p) => !planned.has(p));
+  const invented = [...planned].filter((p) => !changed.has(p));
+  if (missing.length === 0 && invented.length === 0) return null;
+  const parts = [`plan coverage gap (${planned.size} planned / ${changed.size} changed)`];
+  if (missing.length) parts.push(`missing from plan: ${missing.join(", ")}`);
+  if (invented.length) parts.push(`not in diff: ${invented.join(", ")}`);
+  return parts.join(" — ");
+}
+
 // Snapshot of the previous posted review (taken at re-run time); best-effort parse.
 function parsePriorFindings(json: string | null): PriorFinding[] | undefined {
   if (!json) return undefined;
@@ -145,6 +168,12 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
         : null;
     // Flat guide kept in sync for anything still reading file_guide (old UI sessions, copy-review).
     const flatGuide = plan?.cohorts.flatMap((c) => c.files.map(({ path, role, walkthrough }) => ({ path, role, ...(walkthrough ? { walkthrough } : {}) }))) ?? [];
+
+    const coverage = plan ? planCoverageReport(plan, diff) : "no reading plan returned";
+    if (coverage) {
+      onLog?.(prId, "synthesize", `[synthesize] ⚠ ${coverage}\n`);
+      writeArtifacts(dir, { "plan-coverage.txt": coverage });
+    }
 
     const finalFindings = parsed.value.findings.map((f) => {
       const agreement = f.agreement || f.sources.length >= 2;
