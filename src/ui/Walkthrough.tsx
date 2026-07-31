@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type TextareaHTMLAttributes } from "react";
 import type { FileGuideEntry, GhConversation, GhInlineThread, PlanFile, PrRecord, ReadingPlan, StoredFinding, UserComment } from "../shared/types.ts";
-import { addComment, getConversation, getDiff, getFileContent, getFindings, listComments, removeComment, replyToConversation, setFindingSelected, updateComment, updateFinding } from "./api.ts";
+import { addComment, getConversation, getDiff, getFileContent, getFindings, listComments, removeComment, replyToConversation, setFileReviewed, setFindingSelected, updateComment, updateFinding } from "./api.ts";
 import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -35,6 +35,16 @@ function parseReadingPlan(pr: PrRecord): ReadingPlan | null {
   return guide.length > 0
     ? { cohorts: [{ label: "", why: "", files: guide.map((g) => ({ ...g, class: "substantive" as const })) }] }
     : null;
+}
+
+function parseReviewedFiles(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 const SEV_DOT: Record<string, string> = { blocking: "●", serious: "●", moderate: "○", optional: "○" };
@@ -435,6 +445,8 @@ const FileSection = memo(function FileSection({
   revealTail,
   composerLine,
   editingId,
+  reviewed,
+  onToggleReviewed,
   onExpand,
   onOpenComposer,
   onCloseComposer,
@@ -458,6 +470,8 @@ const FileSection = memo(function FileSection({
   revealTail: Record<string, number>;
   composerLine: number | null;
   editingId: number | null;
+  reviewed: boolean;
+  onToggleReviewed: (path: string, reviewed: boolean) => void;
   onExpand: (path: string, row: { dir: "up" | "tail"; key: string }) => void;
   onOpenComposer: (file: string, line: number) => void;
   onCloseComposer: () => void;
@@ -493,6 +507,13 @@ const FileSection = memo(function FileSection({
       <div className="wt-diff-filehead">
         {file.status !== "modified" && <span className={`badge wt-status-${file.status}`}>{file.status}</span>}
         <span className="wt-diff-path">{file.path}</span>
+        <button
+          className={`wt-reviewed-btn ${reviewed ? "wt-reviewed-on" : ""}`}
+          title={reviewed ? "Marked reviewed — click to unmark" : "Mark this file reviewed (progress persists across sessions)"}
+          onClick={() => onToggleReviewed(file.path, !reviewed)}
+        >
+          {reviewed ? "✓ reviewed" : "✓ mark reviewed"}
+        </button>
       </div>
       <table className="difftable">
         <tbody>
@@ -781,6 +802,20 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
   useEffect(() => setOpenSkims(new Set()), [pr.id]);
   const openSkim = useCallback((path: string) => setOpenSkims((s) => new Set(s).add(path)), []);
 
+  // Per-file done state — persisted server-side so multi-day reviews keep
+  // their place. Optimistic local set; the server broadcast confirms it.
+  const [reviewed, setReviewed] = useState<Set<string>>(() => new Set(parseReviewedFiles(pr.reviewed_files)));
+  useEffect(() => setReviewed(new Set(parseReviewedFiles(pr.reviewed_files))), [pr.id]);
+  const toggleReviewed = useCallback((path: string, value: boolean) => {
+    setReviewed((s) => {
+      const n = new Set(s);
+      if (value) n.add(path);
+      else n.delete(path);
+      return n;
+    });
+    setFileReviewed(pr.id, path, value).catch(() => {});
+  }, [pr.id]);
+
   // Attention stat: changed lines in files needing a real read (crux/substantive
   // + anything unplanned) vs. the whole diff. Computed from the parsed diff —
   // the model classifies, it never counts.
@@ -794,6 +829,21 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
     }, 0);
     return attention < total ? { attention, total } : null;
   }, [plan, files, planByPath]);
+
+  // Review progress, measured in substantive lines: reading 41 rename files
+  // isn't progress, so skimmable files count toward neither side.
+  const progress = useMemo(() => {
+    if (!plan) return null;
+    const lines = (f: DiffFile) => f.additions + f.deletions;
+    const attention = files.filter((f) => {
+      const c = planByPath.get(f.path)?.class;
+      return c !== "mechanical" && c !== "boilerplate";
+    });
+    const total = attention.reduce((n, f) => n + lines(f), 0);
+    if (total === 0) return null;
+    const done = attention.filter((f) => reviewed.has(f.path)).reduce((n, f) => n + lines(f), 0);
+    return { done, total, pct: Math.round((done / total) * 100) };
+  }, [plan, files, planByPath, reviewed]);
 
   // Left-rail structure: the plan's cohorts mapped onto files actually present
   // in the diff, plus a trailing group for anything the plan missed.
@@ -1023,12 +1073,19 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
       {files.length > 0 && (
         <div className="wt-body">
           <div className="wt-left">
-          {attentionStat && (
-            <div
-              className="wt-attention"
-              title="changed lines in crux/substantive files vs. the whole diff — the rest is collapsed as skimmable (mechanical/boilerplate)"
-            >
-              ~{attentionStat.attention.toLocaleString()} of {attentionStat.total.toLocaleString()} lines need full attention
+          {(attentionStat || progress) && (
+            <div className="wt-attention">
+              {attentionStat && (
+                <div title="changed lines in crux/substantive files vs. the whole diff — the rest is collapsed as skimmable (mechanical/boilerplate)">
+                  ~{attentionStat.attention.toLocaleString()} of {attentionStat.total.toLocaleString()} lines need full attention
+                </div>
+              )}
+              {progress && (
+                <div className="wt-progress" title={`${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} substantive lines in files you've marked reviewed`}>
+                  <div className="wt-progress-bar"><div className="wt-progress-fill" style={{ width: `${progress.pct}%` }} /></div>
+                  <span className="wt-progress-label">{progress.pct}%</span>
+                </div>
+              )}
             </div>
           )}
           <div className="wt-files">
@@ -1046,13 +1103,14 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                   const ccount = comments.filter((c) => c.file === f.path).length;
                   const cls = planByPath.get(f.path)?.class;
                   const skim = cls === "mechanical" || cls === "boilerplate";
+                  const done = reviewed.has(f.path);
                   return (
                     <div
                       key={f.path}
-                      className={`wt-file ${current && f.path === current.path ? "selected" : ""} ${skim ? "wt-file-skim" : ""}`}
+                      className={`wt-file ${current && f.path === current.path ? "selected" : ""} ${skim ? "wt-file-skim" : ""} ${done ? "wt-file-reviewed" : ""}`}
                       onClick={() => scrollToFile(f.path)}
                     >
-                      <span className="wt-file-order">{plan ? orderNo.get(f.path) : ""}</span>
+                      <span className="wt-file-order">{done ? "✓" : plan ? orderNo.get(f.path) : ""}</span>
                       <span className="wt-file-path" title={f.path}>{f.path}</span>
                       <span className="wt-file-meta">
                         {cls === "crux" && <span className="class-chip class-crux">crux</span>}
@@ -1096,6 +1154,8 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                   revealTail={revealTail}
                   composerLine={composer !== null && composer.file === file.path ? composer.line : null}
                   editingId={editingId !== null && fComments.some((c) => c.id === editingId) ? editingId : null}
+                  reviewed={reviewed.has(file.path)}
+                  onToggleReviewed={toggleReviewed}
                   onExpand={expand}
                   onOpenComposer={openComposer}
                   onCloseComposer={closeComposer}

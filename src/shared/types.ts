@@ -157,6 +157,7 @@ export interface PrRecord {
   review_verdict: string | null; // finalizer: 1–2 sentence bottom line for the reviewer
   file_guide: string | null;     // JSON-encoded FileGuideEntry[] — flat reading order (kept for old rows)
   reading_plan: string | null;   // JSON-encoded ReadingPlan — cohorts + per-file attention class
+  reviewed_files: string | null; // JSON-encoded string[] — files the reviewer marked done in the walkthrough
   prior_findings: string | null; // JSON snapshot of the last POSTED review's findings, taken at re-run
   claude_transport: string | null; // provenance: Claude transport used by the most recent run (e.g. "sdk", "cli (stored login)")
   created_at: string;

@@ -158,7 +158,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         summary: null, headline: null, danger_level: null, danger_reasons: null,
         focus_areas: null, danger_flags: null, finding_themes: null, discussion: null,
         goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
-        review_verdict: null, file_guide: null, reading_plan: null,
+        review_verdict: null, file_guide: null, reading_plan: null, reviewed_files: null,
       });
       hub.broadcast({ type: "findings_updated", prId: id });
     }
@@ -196,6 +196,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     hub.broadcast({ type: "pr_updated", pr: markSeen(db, id) });
     return { ok: true };
   });
+
+  // Per-file walkthrough progress. Persists across sessions; wiped on fresh
+  // re-runs (the pinned diff it refers to changes with the new head).
+  app.patch<{ Params: { id: string }; Body: { path?: string; reviewed?: boolean } | null }>(
+    "/api/prs/:id/progress",
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+      if (!pr) return reply.code(404).send({ error: "pr not found" });
+      const path = String(req.body?.path ?? "").trim();
+      if (!path) return reply.code(400).send({ error: "path required" });
+      let current: string[] = [];
+      try {
+        const parsed = JSON.parse(pr.reviewed_files ?? "[]");
+        if (Array.isArray(parsed)) current = parsed.filter((p): p is string => typeof p === "string");
+      } catch {
+        // corrupt column — start over rather than 500
+      }
+      const set = new Set(current);
+      if (req.body?.reviewed) set.add(path);
+      else set.delete(path);
+      const updated = updatePr(db, id, { reviewed_files: set.size > 0 ? JSON.stringify([...set]) : null });
+      hub.broadcast({ type: "pr_updated", pr: updated });
+      return { ok: true, reviewed: [...set] };
+    },
+  );
 
   // Re-fetch state/mergeability/review-decision/CI without re-running the pipeline.
   app.post<{ Params: { id: string } }>("/api/prs/:id/refresh-status", async (req, reply) => {

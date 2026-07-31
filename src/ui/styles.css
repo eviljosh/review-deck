@@ -889,6 +889,27 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-cohort-why { display: block; font-size: 11px; color: var(--text-muted); font-style: italic; margin-top: 1px; }
 .wt-file-skim { opacity: 0.65; }
 .wt-file-skim:hover, .wt-file-skim.selected { opacity: 1; }
+.wt-file-reviewed .wt-file-path { color: var(--text-muted); }
+.wt-file-reviewed .wt-file-order { color: var(--green); }
+
+/* review-progress bar under the attention stat */
+.wt-progress { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.wt-progress-bar {
+  flex: 1; height: 4px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-subtle); border: 1px solid var(--border);
+}
+.wt-progress-fill { height: 100%; background: var(--green); transition: width 0.2s ease; }
+.wt-progress-label { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+
+/* mark-reviewed toggle in the diff file header */
+.wt-reviewed-btn {
+  margin-left: auto; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text-muted);
+  font-size: 11px; font-family: var(--sans); padding: 1px 8px; cursor: pointer;
+}
+.wt-reviewed-btn:hover { border-color: var(--green); color: var(--green); }
+.wt-reviewed-btn.wt-reviewed-on { background: var(--green-bg); border-color: var(--green); color: var(--green); }
 
 /* attention-class chips (crux / substantive / boilerplate / mechanical) */
 .class-chip {

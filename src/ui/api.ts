@@ -106,6 +106,9 @@ export async function setDefaultPreface(preface: string): Promise<void> {
 export async function setPrPreface(id: number, preface: string): Promise<void> {
   await fetch(`/api/prs/${id}/preface`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ preface }) });
 }
+export async function setFileReviewed(prId: number, path: string, reviewed: boolean): Promise<void> {
+  await fetch(`/api/prs/${prId}/progress`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, reviewed }) });
+}
 export async function setFindingSelected(prId: number, fid: number, selected: boolean): Promise<void> {
   await fetch(`/api/prs/${prId}/findings/${fid}/select`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selected }) });
 }

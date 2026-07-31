@@ -190,7 +190,7 @@ test("POST /api/prs/:id/retry on a posted PR wipes the old review, snapshots pos
   const id = post.json().created[0].id;
   // let the creation-time pipeline finish before simulating the posted state
   for (let i = 0; i < 200 && getPr(d.db, id)!.status === "running"; i++) await setTimeout(10);
-  updatePr(d.db, id, { stage: "posted", status: "done", review_verdict: "old verdict", file_guide: "[]", discussion: "stale discussion recap" });
+  updatePr(d.db, id, { stage: "posted", status: "done", review_verdict: "old verdict", file_guide: "[]", discussion: "stale discussion recap", reviewed_files: JSON.stringify(["x"]) });
   d.db.prepare("UPDATE findings SET posted = 1, selected = 1 WHERE pr_id = ?").run(id);
   const oldWhat = listFindings(d.db, id)[0].what;
 
@@ -205,6 +205,34 @@ test("POST /api/prs/:id/retry on a posted PR wipes the old review, snapshots pos
   // …and the visible review is entirely the fresh run's output (no posted leftovers)
   assert.ok(listFindings(d.db, id).every((f) => !f.posted));
   assert.notEqual(pr.discussion, "stale discussion recap"); // wiped, then re-set by the new triage
+  assert.equal(pr.reviewed_files, null); // progress refers to the old diff — wiped
+});
+
+test("PATCH /api/prs/:id/progress toggles per-file reviewed state", async () => {
+  const d = deps();
+  const app = buildApp(d);
+  const post = await app.inject({ method: "POST", url: "/api/prs", payload: { urls: ["https://github.com/o/r/pull/5"] } });
+  const id = post.json().created[0].id;
+
+  const mark = await app.inject({ method: "PATCH", url: `/api/prs/${id}/progress`, payload: { path: "src/a.ts", reviewed: true } });
+  assert.equal(mark.statusCode, 200);
+  assert.deepEqual(mark.json().reviewed, ["src/a.ts"]);
+  const second = await app.inject({ method: "PATCH", url: `/api/prs/${id}/progress`, payload: { path: "src/b.ts", reviewed: true } });
+  assert.deepEqual(new Set(second.json().reviewed), new Set(["src/a.ts", "src/b.ts"]));
+  assert.deepEqual(new Set(JSON.parse(getPr(d.db, id)!.reviewed_files!)), new Set(["src/a.ts", "src/b.ts"]));
+
+  const unmark = await app.inject({ method: "PATCH", url: `/api/prs/${id}/progress`, payload: { path: "src/a.ts", reviewed: false } });
+  assert.deepEqual(unmark.json().reviewed, ["src/b.ts"]);
+
+  // clearing the last file nulls the column rather than storing "[]"
+  await app.inject({ method: "PATCH", url: `/api/prs/${id}/progress`, payload: { path: "src/b.ts", reviewed: false } });
+  assert.equal(getPr(d.db, id)!.reviewed_files, null);
+
+  // missing path → 400; missing pr → 404
+  const bad = await app.inject({ method: "PATCH", url: `/api/prs/${id}/progress`, payload: {} });
+  assert.equal(bad.statusCode, 400);
+  const gone = await app.inject({ method: "PATCH", url: "/api/prs/9999/progress", payload: { path: "x", reviewed: true } });
+  assert.equal(gone.statusCode, 404);
 });
 
 test("POST /api/prs/:id/findings/select-all flips every unposted finding", async () => {
