@@ -941,6 +941,12 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .flow-legend-added { color: var(--green); }
 .flow-legend-removed { color: var(--red); }
 .wt-map .wt-discussion-body { padding: 10px 14px; }
+/* The Map panel holds a diagram, not a comment thread — give it ~50% more room
+   in both directions (still capped to the viewport by the shared max-width). */
+.wt-discussion.wt-map {
+  width: 1260px;
+  max-height: calc(100vh - 70px);
+}
 
 /* ripple note: out-of-diff impact, context pane */
 .wt-ripple {
