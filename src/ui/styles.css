@@ -911,7 +911,8 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 }
 .flow-delta-frame:hover .flow-delta-expand { opacity: 1; }
 .flow-delta-svg { overflow-x: auto; }
-.flow-delta-svg svg { max-width: 100%; height: auto; }
+/* Fill the boosted wrapper width; !important beats mermaid's inline max-width cap. */
+.flow-delta-svg svg { width: 100%; height: auto; max-width: none !important; }
 
 /* full-screen pan/zoom lightbox for the diagram */
 .flow-lightbox {

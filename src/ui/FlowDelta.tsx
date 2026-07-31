@@ -27,13 +27,23 @@ function loadMermaid() {
 
 let renderSeq = 0;
 
+// Mermaid caps its SVG at the diagram's natural size via an inline max-width;
+// small flowcharts end up postage-stamp sized. Read the natural width from the
+// viewBox so the frame can render the diagram at 1.5× (still capped to the
+// column width — overflow scrolls).
+const SIZE_BOOST = 1.5;
+function naturalWidth(svg: string): number | null {
+  const m = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) [\d.]+"/.exec(svg);
+  return m ? Number.parseFloat(m[1]) : null;
+}
+
 /**
  * Full-screen inspection of the rendered diagram: drag to pan, wheel or the
  * ＋/− buttons to zoom. Closes on ✕ or Escape (capture phase, so an Escape in
  * the lightbox doesn't also close the panel or detail view underneath).
  */
 function FlowLightbox({ svg, onClose }: { svg: string; onClose: () => void }) {
-  const [view, setView] = useState({ tx: 0, ty: 0, scale: 1.5 });
+  const [view, setView] = useState({ tx: 0, ty: 0, scale: 1.5 * SIZE_BOOST });
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   useEffect(() => {
@@ -54,7 +64,7 @@ function FlowLightbox({ svg, onClose }: { svg: string; onClose: () => void }) {
       <div className="flow-lightbox-tools">
         <button className="btn btn-sm" title="Zoom in" onClick={() => zoomBy(1.25)}>＋</button>
         <button className="btn btn-sm" title="Zoom out" onClick={() => zoomBy(1 / 1.25)}>−</button>
-        <button className="btn btn-sm" onClick={() => setView({ tx: 0, ty: 0, scale: 1.5 })}>reset</button>
+        <button className="btn btn-sm" onClick={() => setView({ tx: 0, ty: 0, scale: 1.5 * SIZE_BOOST })}>reset</button>
         <button className="btn btn-sm btn-ghost" onClick={onClose}>✕ (esc)</button>
       </div>
       <div
@@ -109,7 +119,12 @@ export function FlowDelta({ flow }: { flow: FlowDeltaData }) {
       {/* mermaid escapes/sanitizes under securityLevel "strict", so its SVG output is safe to inject */}
       {svg && (
         <div className="flow-delta-frame" title="Click to expand — pan and zoom" onClick={() => setExpanded(true)}>
-          <div className="flow-delta-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          <div className="flow-delta-svg">
+            <div
+              style={naturalWidth(svg) !== null ? { width: Math.round(naturalWidth(svg)! * SIZE_BOOST), maxWidth: "100%" } : undefined}
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
           <button className="flow-delta-expand" title="Expand — pan and zoom">⤢</button>
         </div>
       )}
