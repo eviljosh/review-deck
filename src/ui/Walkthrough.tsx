@@ -5,10 +5,8 @@ import { parseUnifiedDiff, type DiffFile, type DiffLine } from "./diffParse.ts";
 import { highlightLine, langForPath } from "./highlight.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { Md } from "./bits.tsx";
-import { ChatPane } from "./ChatPane.tsx";
 import { FlowDelta, parseFlowDelta } from "./FlowDelta.tsx";
 import { PostControls, usePreface } from "./PostControls.tsx";
-import type { ChatStream } from "./useLivePrs.ts";
 
 function parseGuide(json: string | null): FileGuideEntry[] {
   if (!json) return [];
@@ -429,8 +427,8 @@ function SkimSection({ file, plan, onOpen }: { file: DiffFile; plan: PlanFile; o
   );
 }
 
-// One file's diff table. Memoized so top-level state changes (chat chunks,
-// scroll tracking, panel toggles) don't reconcile thousands of unrelated rows —
+// One file's diff table. Memoized so top-level state changes (scroll
+// tracking, panel toggles) don't reconcile thousands of unrelated rows —
 // with 2k+ line PRs the whole-tree re-render made even typing feel sluggish.
 // Every callback prop must be useCallback-stable and every array/map prop must
 // be referentially stable for the memo to hold.
@@ -631,7 +629,7 @@ const NO_FINDINGS: StoredFinding[] = [];
 const NO_COMMENTS: UserComment[] = [];
 const NO_THREADS: GhInlineThread[] = [];
 
-export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; chat: ChatStream | undefined; onClose: () => void; onPosted?: () => void }) {
+export function Walkthrough({ pr, onClose, onPosted }: { pr: PrRecord; onClose: () => void; onPosted?: () => void }) {
   const [diffText, setDiffText] = useState<string | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [findings, setFindings] = useState<StoredFinding[]>([]);
@@ -1170,9 +1168,6 @@ export function Walkthrough({ pr, chat, onClose, onPosted }: { pr: PrRecord; cha
                 })}
               </Fragment>
             ))}
-          </div>
-          <div className="wt-left-chat">
-            <ChatPane pr={pr} stream={chat} startCollapsed />
           </div>
           </div>
 

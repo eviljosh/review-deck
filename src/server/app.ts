@@ -6,10 +6,9 @@ import type { Exec } from "./exec.ts";
 import type { WsHub } from "./ws.ts";
 import type { LlmEngine } from "./engines/types.ts";
 import { makeClaudeCliEngine } from "./engines/claude-cli.ts";
-import { engineModelOptions, loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
-import { runChatTurn } from "./chat.ts";
+import { loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
-import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, listChatMessages, clearChatMessages, replaceFindings } from "./db.ts";
+import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, replaceFindings } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -89,7 +88,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   // Fully remove a PR: stop any live run, drop its throwaway worktree and its
-  // artifacts on disk, delete the row (findings/runs/comments/chat cascade),
+  // artifacts on disk, delete the row (findings/runs/comments cascade),
   // and tell clients to drop it.
   async function removePr(pr: PrRecord): Promise<void> {
     running.get(pr.id)?.abort();
@@ -437,37 +436,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     } catch (err) {
       return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
     }
-  });
-
-  // Per-PR chat: history, one streaming turn at a time, clear.
-  const chatBusy = new Set<number>();
-  app.get<{ Params: { id: string } }>("/api/prs/:id/chat", async (req, reply) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
-    return listChatMessages(db, id);
-  });
-  app.post<{ Params: { id: string }; Body: { message: string } }>("/api/prs/:id/chat", async (req, reply) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
-    const message = String(req.body?.message ?? "").trim();
-    if (!message) return reply.code(400).send({ error: "message required" });
-    if (chatBusy.has(id)) return reply.code(409).send({ error: "chat is already answering" });
-    chatBusy.add(id);
-    const cfg = loadReviewConfig(db);
-    const chatEngine = claudeEngine(cfg);
-    // Fire-and-forget; the answer streams over the WebSocket.
-    void runChatTurn(
-      { db, engine: chatEngine, dataDir, hub, modelOptions: engineModelOptions(cfg, chatEngine.name), timeoutMs: cfg.engineTimeoutMs },
-      id, message,
-    ).catch((err) => console.error(`chat turn failed for pr ${id}`, err))
-      .finally(() => chatBusy.delete(id));
-    return { ok: true };
-  });
-  app.delete<{ Params: { id: string } }>("/api/prs/:id/chat", async (req, reply) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || !getPr(db, id)) return reply.code(404).send({ error: "pr not found" });
-    clearChatMessages(db, id);
-    return { ok: true };
   });
 
   // Global review settings (engines, models, marker, dimensions, risk flags).

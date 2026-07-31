@@ -75,14 +75,6 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
 
-CREATE TABLE IF NOT EXISTS chat_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','subsec'))
-);
-
 CREATE TABLE IF NOT EXISTS finding_feedback (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
@@ -454,26 +446,6 @@ export function listRejectedExamples(db: Database.Database, owner: string, repo:
     )
     .all(owner, repo, limit) as { severity: string | null; dimension: string | null; what: string }[];
   return rows.map((r) => `[${r.severity ?? "?"}${r.dimension ? `/${r.dimension}` : ""}] ${r.what}`);
-}
-
-// ---------- per-PR chat ----------
-
-export function insertChatMessage(
-  db: Database.Database,
-  prId: number,
-  role: "user" | "assistant",
-  content: string,
-): import("../shared/types.ts").ChatMessage {
-  const info = db.prepare("INSERT INTO chat_messages (pr_id, role, content) VALUES (?, ?, ?)").run(prId, role, content);
-  return db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(Number(info.lastInsertRowid)) as import("../shared/types.ts").ChatMessage;
-}
-
-export function listChatMessages(db: Database.Database, prId: number): import("../shared/types.ts").ChatMessage[] {
-  return db.prepare("SELECT * FROM chat_messages WHERE pr_id = ? ORDER BY id ASC").all(prId) as import("../shared/types.ts").ChatMessage[];
-}
-
-export function clearChatMessages(db: Database.Database, prId: number): void {
-  db.prepare("DELETE FROM chat_messages WHERE pr_id = ?").run(prId);
 }
 
 // ---------- reviewer comments (merged into the posted review) ----------

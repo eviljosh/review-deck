@@ -19,9 +19,7 @@ import { DangerBadge, DiffStat, Md, StageBadge, StatusBadges, StatusPill } from 
 import { FlowDelta, parseFlowDelta } from "./FlowDelta.tsx";
 import { PostControls, usePreface } from "./PostControls.tsx";
 import { Walkthrough } from "./Walkthrough.tsx";
-import { ChatPane } from "./ChatPane.tsx";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
-import type { ChatStream } from "./useLivePrs.ts";
 
 function parseList(json: string | null): string[] {
   if (!json) return [];
@@ -141,13 +139,11 @@ export function PrDetail({
   pr,
   log,
   findingsBump,
-  chat,
   onClose,
 }: {
   pr: PrRecord;
   log: string;
   findingsBump: number | undefined;
-  chat: ChatStream | undefined;
   onClose: () => void;
 }) {
   const reasons = parseList(pr.danger_reasons);
@@ -249,7 +245,7 @@ export function PrDetail({
 
   return (
     <div className="detail">
-      {walkthrough && <Walkthrough pr={pr} chat={chat} onClose={() => setWalkthrough(false)} onPosted={notifyPosted} />}
+      {walkthrough && <Walkthrough pr={pr} onClose={() => setWalkthrough(false)} onPosted={notifyPosted} />}
       {toast && <div className="toast">{toast}</div>}
       <div className="detail-header">
         <div className="titleblock">
@@ -467,12 +463,6 @@ export function PrDetail({
         {showGate && (
           <div className="section post-gate">
             <PostControls pr={pr} selectedCount={selectedCount} commentCount={commentCount} preface={preface} onPosted={notifyPosted} />
-          </div>
-        )}
-
-        {pr.worktree_path && (pr.stage === "ready" || pr.stage === "posted" || pr.stage === "synthesize" || pr.stage === "deep_review") && (
-          <div className="section">
-            <ChatPane pr={pr} stream={chat} />
           </div>
         )}
 

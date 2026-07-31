@@ -1,4 +1,4 @@
-import type { PrRecord, ReadingPlan, StoredFinding, UserComment } from "./types.ts";
+import type { FlowDelta, PrRecord, ReadingPlan, StoredFinding, UserComment } from "./types.ts";
 
 function parseJsonList(json: string | null): string[] {
   if (!json) return [];
@@ -15,6 +15,16 @@ function parsePlan(json: string | null): ReadingPlan | null {
   try {
     const parsed = JSON.parse(json) as ReadingPlan;
     return Array.isArray(parsed?.cohorts) && parsed.cohorts.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseFlow(json: string | null): FlowDelta | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as FlowDelta;
+    return parsed?.mermaid?.trim() ? parsed : null;
   } catch {
     return null;
   }
@@ -42,6 +52,7 @@ export function buildReviewMarkdown(
   const flags = parseJsonList(pr.danger_flags);
   const gaps = parseJsonList(pr.goal_gaps);
   const plan = parsePlan(pr.reading_plan);
+  const flow = parseFlow(pr.flow_delta);
 
   lines.push(`# Code review: ${pr.title ?? `PR #${pr.number}`} (${pr.owner}/${pr.repo}#${pr.number})`);
   lines.push("");
@@ -69,6 +80,13 @@ export function buildReviewMarkdown(
 
   if (pr.review_verdict) lines.push("", "## Bottom line", "", pr.review_verdict);
   if (pr.summary) lines.push("", "## Summary", "", pr.summary);
+  if (pr.discussion) lines.push("", "## Discussion so far", "", pr.discussion);
+
+  if (flow) {
+    lines.push("", "## Flow delta", "");
+    if (flow.caption) lines.push(flow.caption, "");
+    lines.push("```mermaid", flow.mermaid, "```");
+  }
 
   if (reasons.length > 0) {
     lines.push("", `## Why the ${pr.danger_level ?? ""} rating`.replace("  ", " "), "");

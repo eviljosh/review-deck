@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FlowDelta as FlowDeltaData, PrRecord } from "../shared/types.ts";
 import { Md } from "./bits.tsx";
 
@@ -28,14 +28,70 @@ function loadMermaid() {
 let renderSeq = 0;
 
 /**
+ * Full-screen inspection of the rendered diagram: drag to pan, wheel or the
+ * ＋/− buttons to zoom. Closes on ✕ or Escape (capture phase, so an Escape in
+ * the lightbox doesn't also close the panel or detail view underneath).
+ */
+function FlowLightbox({ svg, onClose }: { svg: string; onClose: () => void }) {
+  const [view, setView] = useState({ tx: 0, ty: 0, scale: 1.5 });
+  const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
+  const zoomBy = (f: number) => setView((v) => ({ ...v, scale: Math.min(6, Math.max(0.2, v.scale * f)) }));
+
+  return (
+    <div className="flow-lightbox">
+      <div className="flow-lightbox-tools">
+        <button className="btn btn-sm" title="Zoom in" onClick={() => zoomBy(1.25)}>＋</button>
+        <button className="btn btn-sm" title="Zoom out" onClick={() => zoomBy(1 / 1.25)}>−</button>
+        <button className="btn btn-sm" onClick={() => setView({ tx: 0, ty: 0, scale: 1.5 })}>reset</button>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>✕ (esc)</button>
+      </div>
+      <div
+        className="flow-lightbox-canvas"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (d) setView((v) => ({ ...v, tx: d.tx + e.clientX - d.x, ty: d.ty + e.clientY - d.y }));
+        }}
+        onPointerUp={() => { drag.current = null; }}
+        onPointerCancel={() => { drag.current = null; }}
+        onWheel={(e) => zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1)}
+      >
+        <div
+          className="flow-lightbox-inner"
+          style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})` }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Triage's delta flow diagram: the major code/data flow with this PR's change
  * overlaid (added = green, removed = red-dashed). Model-written Mermaid can be
  * invalid — a failed render degrades to the caption plus the source in a fold,
- * never a blank box.
+ * never a blank box. Click the diagram (or ⤢) for a pannable, zoomable
+ * full-screen view.
  */
 export function FlowDelta({ flow }: { flow: FlowDeltaData }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -51,7 +107,12 @@ export function FlowDelta({ flow }: { flow: FlowDeltaData }) {
   return (
     <div className="flow-delta">
       {/* mermaid escapes/sanitizes under securityLevel "strict", so its SVG output is safe to inject */}
-      {svg && <div className="flow-delta-svg" dangerouslySetInnerHTML={{ __html: svg }} />}
+      {svg && (
+        <div className="flow-delta-frame" title="Click to expand — pan and zoom" onClick={() => setExpanded(true)}>
+          <div className="flow-delta-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          <button className="flow-delta-expand" title="Expand — pan and zoom">⤢</button>
+        </div>
+      )}
       {!svg && !failed && <div className="wt-quiet">Rendering diagram…</div>}
       {failed && (
         <details className="fold">
@@ -65,6 +126,7 @@ export function FlowDelta({ flow }: { flow: FlowDeltaData }) {
         <span className="flow-legend-removed">□ removed</span>
         <span>■ unchanged</span>
       </div>
+      {expanded && svg && <FlowLightbox svg={svg} onClose={() => setExpanded(false)} />}
     </div>
   );
 }

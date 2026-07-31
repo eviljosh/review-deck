@@ -1,4 +1,4 @@
-import type { ChatMessage, GhConversation, PrRecord, ReviewEvent, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
+import type { GhConversation, PrRecord, ReviewEvent, RunRecord, StoredFinding, UserComment } from "../shared/types.ts";
 
 export interface DimensionDef { key: string; guidance: string }
 export interface RiskFlagDef { key: string; description: string }
@@ -197,21 +197,6 @@ export async function updateComment(id: number, cid: number, body: string): Prom
   });
   if (!res.ok) throw new Error(`comment update failed: ${res.status}`);
   return res.json();
-}
-
-export async function getChatHistory(id: number): Promise<ChatMessage[]> {
-  const res = await fetch(`/api/prs/${id}/chat`);
-  if (!res.ok) return [];
-  return res.json();
-}
-export async function sendChatMessage(id: number, message: string): Promise<{ ok?: boolean; error?: string }> {
-  const res = await fetch(`/api/prs/${id}/chat`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }),
-  });
-  return res.json();
-}
-export async function clearChat(id: number): Promise<void> {
-  await fetch(`/api/prs/${id}/chat`, { method: "DELETE" });
 }
 
 export async function getSettings(): Promise<ReviewSettings> {

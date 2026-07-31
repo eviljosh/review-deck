@@ -143,7 +143,7 @@ test("POST /api/prs/:id/retry returns ok for an existing pr", async () => {
   assert.deepEqual(retry.json(), { ok: true });
 });
 
-test("claudeTransport=cli routes pipeline and chat Claude calls through the CLI engine", async () => {
+test("claudeTransport=cli routes pipeline Claude calls through the CLI engine", async () => {
   const d = deps();
   let cliRuns = 0;
   let sdkRuns = 0;

@@ -2,22 +2,14 @@ import { useEffect, useState } from "react";
 import type { PrRecord, WsMessage } from "../shared/types.ts";
 import { listPrs } from "./api.ts";
 
-export interface ChatStream {
-  streaming: string;      // accumulating assistant answer for the in-flight turn
-  bump: number;           // increments when a turn finishes → refetch history
-  error: string | null;
-}
-
 export function useLivePrs(): {
   prs: PrRecord[];
   logs: Record<number, string>;
   findingsBump: Record<number, number>;
-  chat: Record<number, ChatStream>;
 } {
   const [prs, setPrs] = useState<PrRecord[]>([]);
   const [logs, setLogs] = useState<Record<number, string>>({});
   const [findingsBump, setFindingsBump] = useState<Record<number, number>>({});
-  const [chat, setChat] = useState<Record<number, ChatStream>>({});
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -45,21 +37,6 @@ export function useLivePrs(): {
         } else if (msg.type === "pr_deleted") {
           setPrs((prev) => prev.filter((p) => p.id !== msg.prId));
           setLogs((prev) => { const next = { ...prev }; delete next[msg.prId]; return next; });
-        } else if (msg.type === "chat_chunk") {
-          setChat((prev) => {
-            const cur = prev[msg.prId] ?? { streaming: "", bump: 0, error: null };
-            return { ...prev, [msg.prId]: { ...cur, streaming: cur.streaming + msg.chunk, error: null } };
-          });
-        } else if (msg.type === "chat_done") {
-          setChat((prev) => {
-            const cur = prev[msg.prId] ?? { streaming: "", bump: 0, error: null };
-            return { ...prev, [msg.prId]: { streaming: "", bump: cur.bump + 1, error: null } };
-          });
-        } else if (msg.type === "chat_error") {
-          setChat((prev) => {
-            const cur = prev[msg.prId] ?? { streaming: "", bump: 0, error: null };
-            return { ...prev, [msg.prId]: { streaming: "", bump: cur.bump + 1, error: msg.error } };
-          });
         }
       };
       // Reconnect with backoff when the connection drops (server restart, sleep).
@@ -78,5 +55,5 @@ export function useLivePrs(): {
     };
   }, []);
 
-  return { prs, logs, findingsBump, chat };
+  return { prs, logs, findingsBump };
 }

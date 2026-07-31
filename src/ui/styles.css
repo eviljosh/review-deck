@@ -775,7 +775,7 @@ a:hover { text-decoration: underline; }
   padding-top: 10px;
 }
 
-/* Left column: scrollable file list on top, chat pinned at the bottom. */
+/* Left column: scrollable file list. */
 .wt-left {
   display: flex;
   flex-direction: column;
@@ -785,8 +785,6 @@ a:hover { text-decoration: underline; }
   padding-right: 8px;
 }
 .wt-files { flex: 1; min-height: 80px; overflow-y: auto; }
-.wt-left-chat { flex-shrink: 0; }
-.wt-left-chat .chat-scroll { max-height: 280px; }
 .wt-file {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; border-radius: var(--radius); cursor: pointer;
@@ -902,8 +900,38 @@ tr.dl-revealed .dl-no { opacity: 0.55; }
 .wt-progress-label { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
 
 /* delta flow diagram (triage's before/after picture) */
+.flow-delta-frame { position: relative; cursor: zoom-in; }
+.flow-delta-frame:hover { background: var(--surface-subtle); border-radius: var(--radius); }
+.flow-delta-expand {
+  position: absolute; top: 4px; right: 4px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text-muted);
+  font-size: 13px; padding: 1px 7px; cursor: zoom-in;
+  opacity: 0; transition: opacity 0.12s;
+}
+.flow-delta-frame:hover .flow-delta-expand { opacity: 1; }
 .flow-delta-svg { overflow-x: auto; }
 .flow-delta-svg svg { max-width: 100%; height: auto; }
+
+/* full-screen pan/zoom lightbox for the diagram */
+.flow-lightbox {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.flow-lightbox-tools {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.flow-lightbox-canvas {
+  flex: 1; overflow: hidden; cursor: grab;
+  touch-action: none; /* pointer-drag pans; don't let the browser scroll */
+  display: flex; align-items: center; justify-content: center;
+}
+.flow-lightbox-canvas:active { cursor: grabbing; }
+.flow-lightbox-inner { user-select: none; }
+.flow-lightbox-inner svg { display: block; }
 .flow-delta-caption { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
 .flow-delta-legend {
   display: flex; gap: 14px; margin-top: 6px;
@@ -1061,36 +1089,3 @@ h4 .class-chip { margin-left: 6px; vertical-align: middle; }
 .wt-quiet { color: var(--text-muted); font-size: 12px; }
 .wt-mini-finding { font-size: 12.5px; padding: 3px 0; border-bottom: 1px solid var(--border-muted); }
 .wt-mini-line { font-family: var(--mono); color: var(--text-muted); font-size: 11px; }
-
-/* ---------- chat pane ---------- */
-
-.chat-pane {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
-.chat-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
-  font-weight: 600; font-size: 13px;
-}
-.chat-head-actions { display: flex; align-items: center; gap: 4px; }
-.chat-collapsed { cursor: pointer; }
-.chat-collapsed .chat-head { border-bottom: none; }
-.chat-collapsed:hover { background: var(--accent-soft); border-color: var(--accent); }
-.chat-expand-hint { color: var(--accent); font-size: 12px; font-weight: 400; }
-.chat-scroll { overflow-y: auto; max-height: 420px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.chat-empty { color: var(--text-muted); font-size: 12.5px; }
-.chat-msg { border-radius: var(--radius); padding: 6px 10px; font-size: 13px; max-width: 92%; }
-.chat-user { background: var(--accent-soft); align-self: flex-end; }
-.chat-assistant { background: var(--surface-subtle); align-self: flex-start; }
-.chat-streaming { opacity: 0.9; }
-.chat-thinking { color: var(--text-muted); font-size: 12px; font-style: italic; }
-.chat-input-row { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border-muted); }
-.chat-input-row textarea {
-  flex: 1; min-height: 38px; max-height: 120px; resize: vertical;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 7px 10px; font-family: inherit; font-size: 13px;
-}

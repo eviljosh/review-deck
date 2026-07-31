@@ -223,23 +223,12 @@ export const createPrBodySchema = z.object({
   urls: z.array(prUrlSchema).min(1),
 });
 
-export interface ChatMessage {
-  id: number;
-  pr_id: number;
-  role: "user" | "assistant";
-  content: string;
-  created_at: string;
-}
-
 export type WsMessage =
   | { type: "pr_updated"; pr: PrRecord }
   | { type: "pr_log"; prId: number; stage: string; chunk: string }
   | { type: "findings_updated"; prId: number }
   | { type: "pr_log_reset"; prId: number }
   | { type: "pr_deleted"; prId: number }
-  | { type: "chat_chunk"; prId: number; chunk: string }
-  | { type: "chat_done"; prId: number }
-  | { type: "chat_error"; prId: number; error: string }
   | { type: "hello" };
 
 export type FindingSeverity = "blocking" | "serious" | "moderate" | "optional";

@@ -17,6 +17,8 @@ function seedReviewed() {
     danger_level: "medium",
     danger_reasons: JSON.stringify(["touches a shared util"]),
     danger_flags: JSON.stringify(["api_contract"]),
+    discussion: "@alice pushed back on the retry cap; unresolved.",
+    flow_delta: JSON.stringify({ mermaid: "flowchart LR\n  A --> B", caption: "B now retries." }),
     reading_plan: JSON.stringify({ cohorts: [
       { label: "Core logic", why: "Where the behavior changes.", files: [
         { path: "src/retry.ts", class: "crux", role: "The retry wrapper itself.", ripple: "`src/jobs.ts:88` still assumes fetch throws on first failure." },
@@ -50,6 +52,11 @@ test("buildReviewMarkdown includes header, goal+verdict+gaps, bottom line, ratin
   assert.match(md, /unbounded retry loop/);
   assert.match(md, /## Why the medium rating/);
   assert.match(md, /touches a shared util/);
+  assert.match(md, /## Discussion so far/);
+  assert.match(md, /@alice pushed back on the retry cap/);
+  assert.match(md, /## Flow delta/);
+  assert.match(md, /```mermaid\nflowchart LR/);
+  assert.match(md, /B now retries\./);
   assert.match(md, /## Reading plan/);
   assert.match(md, /### Core logic/);
   assert.match(md, /`src\/retry\.ts` _\(crux\)_ — The retry wrapper itself\./);

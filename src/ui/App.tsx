@@ -51,7 +51,7 @@ function hashPrId(): number | null {
 }
 
 export function App() {
-  const { prs, logs, findingsBump, chat } = useLivePrs();
+  const { prs, logs, findingsBump } = useLivePrs();
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -220,7 +220,6 @@ export function App() {
             pr={sel}
             log={logs[sel.id] ?? ""}
             findingsBump={findingsBump[sel.id]}
-            chat={chat[sel.id]}
             onClose={deselect}
           />
         )}
