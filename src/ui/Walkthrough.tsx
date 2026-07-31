@@ -735,6 +735,12 @@ export function Walkthrough({ pr, onClose, onPosted }: { pr: PrRecord; onClose: 
         else if (discussionOpen) setDiscussionOpen(false);
         else onClose();
       }
+      // n — mark the current file reviewed and jump to the next unreviewed one.
+      // Suppressed while a panel is open so it can't scroll the page underneath.
+      if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !mapOpen && !discussionOpen) {
+        e.preventDefault();
+        advanceTour(true);
+      }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -863,6 +869,21 @@ export function Walkthrough({ pr, onClose, onPosted }: { pr: PrRecord; onClose: 
     const done = attention.filter((f) => reviewed.has(f.path)).reduce((n, f) => n + lines(f), 0);
     return { done, total, pct: Math.round((done / total) * 100) };
   }, [plan, files, planByPath, reviewed]);
+
+  // Guided tour: walk the plan order through files that need reading (skim
+  // files are excluded — their collapsed row is read in passing). "Done" marks
+  // the current file reviewed and jumps to the next unreviewed one, wrapping
+  // back to earlier files you jumped over.
+  const tourFiles = useMemo(() => files.filter((f) => !skimmable(f.path)), [files, skimmable]);
+  const tourRemaining = useMemo(() => tourFiles.filter((f) => !reviewed.has(f.path)).length, [tourFiles, reviewed]);
+  const advanceTour = useCallback((markCurrent: boolean) => {
+    const cur = files.find((f) => f.path === currentPath) ?? files[0] ?? null;
+    if (markCurrent && cur && !skimmable(cur.path) && !reviewed.has(cur.path)) toggleReviewed(cur.path, true);
+    const idx = cur ? tourFiles.findIndex((f) => f.path === cur.path) : -1;
+    const ordered = [...tourFiles.slice(idx + 1), ...tourFiles.slice(0, Math.max(0, idx + 1))];
+    const next = ordered.find((f) => f.path !== cur?.path && !reviewed.has(f.path));
+    if (next) scrollToFile(next.path);
+  }, [files, currentPath, tourFiles, reviewed, skimmable, toggleReviewed]);
 
   // Left-rail structure: the plan's cohorts mapped onto files actually present
   // in the diff, plus a trailing group for anything the plan missed.
@@ -1258,6 +1279,34 @@ export function Walkthrough({ pr, onClose, onPosted }: { pr: PrRecord; onClose: 
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <div className="wt-tour">
+          {tourRemaining > 0 ? (
+            <>
+              <span className="wt-tour-count">
+                {tourFiles.length - tourRemaining} of {tourFiles.length} file{tourFiles.length === 1 ? "" : "s"} reviewed
+              </span>
+              <button
+                className="btn btn-sm btn-primary"
+                title="Mark this file reviewed and jump to the next unreviewed one (n)"
+                onClick={() => advanceTour(true)}
+              >
+                ✓ Done — next file
+              </button>
+              <button
+                className="btn btn-sm btn-ghost"
+                title="Jump to the next unreviewed file without marking this one"
+                onClick={() => advanceTour(false)}
+              >
+                skip →
+              </button>
+            </>
+          ) : (
+            <span className="wt-tour-count">All {tourFiles.length} file{tourFiles.length === 1 ? "" : "s"} reviewed ✓</span>
+          )}
         </div>
       )}
     </div>
