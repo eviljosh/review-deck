@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Exec } from "./exec.ts";
@@ -88,6 +90,10 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
   }
 
   const dir = stageArtifactDir(dataDir, prId, "synthesize");
+  // Pre-plan-stage runs wrote plan-coverage.txt here; a stale one reads as a
+  // phantom gap to diagnostics (the live file now lives under plan/), so old
+  // rows self-clean on their next re-run.
+  rmSync(join(dir, "plan-coverage.txt"), { force: true });
   try {
     const diff = await getPinnedDiff(exec, dataDir, pr);
     const anchors = anchorableLines(diff);

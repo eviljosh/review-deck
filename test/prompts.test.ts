@@ -61,10 +61,14 @@ test("buildPlanPrompt asks for cohorts with attention classes over an explicit f
   // the file list is authoritative — classify every path, invent none
   assert.match(system, /Classify EVERY/);
   assert.match(system, /Do NOT include any path that is not on the list/);
-  // ripple notes: out-of-diff caller impact, explicitly optional
+  // ripple notes: a forced per-crux-file decision, not a trailing optional
+  // (trailing-optional shape is what degraded first under load — 0 ripples on
+  // a 38-file PR with 3 crux files)
   assert.match(system, /"ripple"/);
+  assert.match(system, /EVERY crux file/);
+  assert.match(system, /EXPLICIT per-file decision/);
   assert.match(system, /OUTSIDE this diff/);
-  assert.match(system, /OMIT the/);
+  assert.match(system, /never "didn't look"/);
   // the prompt carries the numbered list, the intent, and the diff
   assert.match(prompt, /Changed files \(2/);
   assert.match(prompt, /1\. x\.ts/);

@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { openDb, insertPr, updatePr, listFindings, getPr } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import type { LlmEngine } from "../src/server/engines/types.ts";
 import type { Finding } from "../src/shared/types.ts";
 import { runSynthesize } from "../src/server/synthesize.ts";
+import { stageArtifactDir, writeArtifacts } from "../src/server/artifacts.ts";
 
 // Isolated per-test artifact dir: stages read pinned artifacts by pr id, so a
 // shared dataDir would leak artifacts across test files.
@@ -39,6 +42,17 @@ test("runSynthesize persists finalized findings, marks anchorable, advances to r
   assert.equal(findings[0].agreement, true);
   assert.equal(findings[0].anchorable, true); // line 2 is in the diff
   assert.equal(findings[0].selected, true); // serious + agreement → pre-selected
+});
+
+test("runSynthesize removes a stale pre-plan-stage coverage artifact from its dir", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  const dataDir = freshDataDir();
+  const dir = stageArtifactDir(dataDir, pr.id, "synthesize");
+  writeArtifacts(dir, { "plan-coverage.txt": "stale gap from a pre-plan-stage run" });
+  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({ findings: [] }) }) };
+  await runSynthesize({ db, exec: diffExec(), finalizer, dataDir, onUpdate: () => {} }, pr.id, raw);
+  assert.ok(!existsSync(join(dir, "plan-coverage.txt")));
 });
 
 test("runSynthesize feeds the plan stage's classes into the finalizer prompt", async () => {
