@@ -41,90 +41,30 @@ test("runSynthesize persists finalized findings, marks anchorable, advances to r
   assert.equal(findings[0].selected, true); // serious + agreement → pre-selected
 });
 
-test("runSynthesize persists the cohort reading plan and a flattened file_guide", async () => {
+test("runSynthesize feeds the plan stage's classes into the finalizer prompt", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    plan: { cohorts: [
-      { label: "Core logic", why: "Where the behavior changes.", files: [
-        { path: "x.ts", class: "crux", role: "The decision.", walkthrough: "- `run()` drives the retry loop.", ripple: "`caller.ts:9` still passes the old options shape." },
+  updatePr(db, pr.id, {
+    reading_plan: JSON.stringify({ cohorts: [
+      { label: "Core", why: "", files: [
+        { path: "x.ts", class: "crux", role: "r1" },
+        { path: "y.ts", class: "mechanical", role: "r2" },
       ] },
-      { label: "Mechanical", why: "Renames only.", files: [
-        { path: "y.ts", class: "mechanical", role: "Rename `Foo`→`Bar` — no logic change." },
-      ] },
-      { label: "Empty", why: "dropped", files: [] },
-    ] },
-    findings: [
-      { dimension: "security", severity: "blocking", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
-    ],
-  }) }) };
+    ] }),
+  });
+  let seenSystem = "";
+  const finalizer: LlmEngine = { name: "claude", run: async (req) => {
+    seenSystem = req.system;
+    return { text: JSON.stringify({ findings: [] }) };
+  } };
   const result = await runSynthesize(
     { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
     pr.id, raw,
   );
-  assert.equal(result.stage, "ready");
-  const plan = JSON.parse(result.reading_plan!);
-  assert.equal(plan.cohorts.length, 2); // empty cohort dropped
-  assert.equal(plan.cohorts[0].label, "Core logic");
-  assert.equal(plan.cohorts[0].files[0].class, "crux");
-  assert.equal(plan.cohorts[0].files[0].ripple, "`caller.ts:9` still passes the old options shape.");
-  assert.equal(plan.cohorts[1].files[0].class, "mechanical");
-  assert.equal("ripple" in plan.cohorts[1].files[0], false); // absent, not empty-string
-  // flat guide mirrors the plan order for anything still reading file_guide
-  assert.deepEqual(JSON.parse(result.file_guide!).map((f: { path: string }) => f.path), ["x.ts", "y.ts"]);
-});
-
-test("runSynthesize logs a coverage warning when the plan misses or invents files", async () => {
-  const db = openDb(":memory:");
-  const pr = seedDeepReviewed(db);
-  // DIFF changes x.ts only; the plan omits it and names a file outside the diff.
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    plan: { cohorts: [{ label: "All", why: "", files: [{ path: "other.ts", class: "substantive", role: "r" }] }] },
-    findings: [
-      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
-    ],
-  }) }) };
-  const logs: string[] = [];
-  await runSynthesize(
-    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {}, onLog: (_id, _stage, c) => logs.push(c) },
-    pr.id, raw,
-  );
-  const warning = logs.find((l) => l.includes("plan coverage gap"));
-  assert.ok(warning, logs.join(""));
-  assert.match(warning!, /missing from plan: x\.ts/);
-  assert.match(warning!, /not in diff: other\.ts/);
-});
-
-test("runSynthesize logs when the finalizer returned no reading plan at all", async () => {
-  const db = openDb(":memory:");
-  const pr = seedDeepReviewed(db);
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    findings: [
-      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
-    ],
-  }) }) };
-  const logs: string[] = [];
-  await runSynthesize(
-    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {}, onLog: (_id, _stage, c) => logs.push(c) },
-    pr.id, raw,
-  );
-  assert.ok(logs.some((l) => l.includes("no reading plan returned")), logs.join(""));
-});
-
-test("runSynthesize defaults a missing class to substantive (never auto-collapse unclassified)", async () => {
-  const db = openDb(":memory:");
-  const pr = seedDeepReviewed(db);
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    plan: { cohorts: [{ label: "All", why: "", files: [{ path: "x.ts", role: "r" }] }] },
-    findings: [
-      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
-    ],
-  }) }) };
-  const result = await runSynthesize(
-    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
-    pr.id, raw,
-  );
-  assert.equal(JSON.parse(result.reading_plan!).cohorts[0].files[0].class, "substantive");
+  assert.match(seenSystem, /crux: x\.ts/);
+  assert.match(seenSystem, /mechanical: y\.ts/);
+  // synthesize no longer writes the plan — it only reads it
+  assert.deepEqual(JSON.parse(result.reading_plan!).cohorts[0].label, "Core");
 });
 
 test("runSynthesize stores impact, verdict, and impact-driven selection", async () => {
@@ -153,27 +93,6 @@ test("runSynthesize stores impact, verdict, and impact-driven selection", async 
   assert.equal(findings[0].selected, true);   // high impact → pre-selected
   assert.equal(findings[1].impact, "low");
   assert.equal(findings[1].selected, false);  // impact overrides the severity rule
-});
-
-test("runSynthesize degrades a legacy flat files guide into a single-cohort plan", async () => {
-  const db = openDb(":memory:");
-  const pr = seedDeepReviewed(db);
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({
-    files: [{ path: "x.ts", role: "Core logic of the change.", walkthrough: "- `run()` drives the retry loop — unbounded, see finding 1." }],
-    findings: [
-      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false },
-    ],
-  }) }) };
-  const result = await runSynthesize(
-    { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
-    pr.id, raw,
-  );
-  assert.deepEqual(JSON.parse(result.file_guide!), [
-    { path: "x.ts", role: "Core logic of the change.", walkthrough: "- `run()` drives the retry loop — unbounded, see finding 1." },
-  ]);
-  const plan = JSON.parse(result.reading_plan!);
-  assert.equal(plan.cohorts.length, 1);
-  assert.equal(plan.cohorts[0].files[0].class, "substantive"); // legacy entries never auto-collapse
 });
 
 test("runSynthesize feeds past rejected examples into the finalizer only when enabled", async () => {

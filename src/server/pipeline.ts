@@ -8,6 +8,7 @@ import { findingsArraySchema } from "../shared/types.ts";
 import { engineModelOptions, type ReviewConfig } from "./review-config.ts";
 import { runPrepare } from "./prepare.ts";
 import { runTriage } from "./triage.ts";
+import { runPlan } from "./plan.ts";
 import { runDeepReview } from "./deep-review.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { startRun, finishRun, updatePr, getPr } from "./db.ts";
@@ -126,6 +127,20 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
   }
 
   if (checkpoint()) return;
+  // The reading plan runs beside deep review: its own agent with its own output
+  // budget, fed the diff and the changed-file list explicitly (folded into the
+  // finalizer it starved — 18% file coverage on a 57-file PR). Non-fatal: a
+  // failed plan degrades the walkthrough UI, never the review. It also never
+  // touches pr.stage/status — deep review owns those while both run.
+  const planNeeded = resumeIdx <= 2 || !getPr(db, prId)?.reading_plan;
+  const planPromise = planNeeded
+    ? recordStage(db, prId, "plan", aborted, () =>
+        runPlan({ db, exec, engine: claude, dataDir, onUpdate, onLog, modelOptions: engineModelOptions(config, claude.name), signal, timeoutMs: config.engineTimeoutMs }, prId), onLog)
+        .catch((err) => {
+          if (!aborted()) console.error(`plan stage failed for pr ${prId} (non-fatal)`, err);
+        })
+    : Promise.resolve();
+
   // Resuming at synthesize reuses the persisted raw findings when available;
   // otherwise (artifact missing/invalid) fall back to a live deep review.
   let raw = resumeIdx >= 3 ? loadRawFindings(dataDir, prId) : null;
@@ -136,6 +151,10 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
       raw = await recordStage(db, prId, "deep_review", aborted, () => runDeepReview({ db, exec, claude, codex, config, dataDir, onUpdate, onLog, signal }, prId), onLog);
     } catch (err) { onStageError("deep review", err); return; }
   }
+
+  // The finalizer reads the plan (impact context), so the plan must have
+  // landed — or definitively failed — before synthesize starts.
+  await planPromise;
 
   if (checkpoint()) return;
   const finalizer = config.finalizerEngine === "codex" ? codex : claude;

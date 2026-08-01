@@ -93,6 +93,107 @@ export function buildFullDiffReviewPrompt(
   return { system, prompt: metaBlock(meta, diff, intent) };
 }
 
+// Shared attention-class definitions (used by the plan prompt and its retry).
+const CLASS_SPEC = [
+  "    • \"class\" — how much reviewer attention the file needs:",
+  "        crux — where the real decisions live; read line by line.",
+  "        substantive — genuine behavior change; read carefully.",
+  "        boilerplate — predictable wiring/registration/config echo; skim.",
+  "        mechanical — pure renames, moves, formatting, generated output, lockfiles —",
+  "        you verified there is NO behavior change.",
+  "      BE CONSERVATIVE: if ANY hunk in the file changes behavior, the file is at least",
+  "      substantive. When unsure, say substantive — never mechanical. The UI collapses",
+  "      boilerplate/mechanical files, so a wrong tag hides real logic from the reviewer.",
+];
+
+export function buildPlanPrompt(
+  meta: { title: string; additions: number; deletions: number },
+  diff: string,
+  changedPaths: string[],
+  intent?: string,
+  repoGuidance?: string,
+): { system: string; prompt: string } {
+  const system = [
+    PROMPT_INJECTION_GUARD, "",
+    "You are preparing a guided READING PLAN for a busy human reviewer of a GitHub pull",
+    "request. Your plan decides what they read carefully and what they only skim — organize",
+    "the changed files into cohorts: ordered conceptual groups read in sequence, foundation",
+    "first (e.g. schema → core logic → callers → UI → tests), NOT alphabetical.",
+    "",
+    "The 'Changed files' list in the input is authoritative and complete. Classify EVERY",
+    "path on it exactly once. Do NOT include any path that is not on the list. Lockfiles",
+    "and generated files belong in a mechanical cohort, never skipped.",
+    "",
+    "Each cohort:",
+    "  • \"label\" — a 2–4 word name (e.g. \"Schema & migrations\").",
+    "  • \"why\" — ONE sentence: what question reading this cohort answers, and why it comes",
+    "    at this point in the order.",
+    "  • \"files\" — the cohort's files in reading order. Per file:",
+    "    • \"path\" — exactly as it appears in the changed-files list.",
+    ...CLASS_SPEC,
+    "    • \"role\" — ONE short sentence: what the file does in this change and how it",
+    "      connects to the others. For boilerplate/mechanical files this is the",
+    "      justification for skimming (e.g. \"rename `FooService`→`BarService` — no logic",
+    "      change\").",
+    "    • \"walkthrough\" — crux/substantive files only: a compact markdown tour of the",
+    "      file's changes: 2–5 `-` bullets, each naming a major function/class/section in",
+    "      `backticks` and what it tries to do. No line-by-line narration. Omit for",
+    "      boilerplate/mechanical files.",
+    "    • \"ripple\" — OPTIONAL out-of-diff impact note. When the file changes an exported/",
+    "      public signature, contract, or shared behavior, Grep the worktree for call sites",
+    "      OUTSIDE this diff. If un-updated callers could now misbehave, say which",
+    "      (`path:line`) and what assumption breaks — 1–3 short markdown lines. OMIT the",
+    "      field entirely when nothing outside the diff is affected — most files have no",
+    "      ripple, and a noisy ripple note is worse than none.",
+    ...repoGuidanceBlock(repoGuidance),
+    "",
+    "Respond with ONLY a JSON object (no prose, no code fence) of this exact shape:",
+    '{ "cohorts": [ { "label": string, "why": string, "files": [',
+    '    { "path": string, "class": "crux"|"substantive"|"boilerplate"|"mechanical",',
+    '      "role": string, "walkthrough": string, "ripple": string } ] } ] }',
+    "You may Read/Grep/Glob the checked-out worktree for context. Do not modify anything.",
+  ].join("\n");
+
+  const intentBlock = intent?.trim() ? ["", "Distilled intent (from triage):", intent.trim()] : [];
+  const prompt = [
+    `PR title: ${meta.title}`,
+    `Size: +${meta.additions}/-${meta.deletions}`,
+    ...intentBlock,
+    "",
+    `Changed files (${changedPaths.length} — classify every one):`,
+    ...changedPaths.map((p, i) => `${i + 1}. ${p}`),
+    "",
+    "Unified diff:", "```diff", diff, "```",
+  ].join("\n");
+
+  return { system, prompt };
+}
+
+/** Completeness pass: classify only the files the first plan pass missed. */
+export function buildPlanRetryPrompt(missing: { path: string; diff: string }[]): { system: string; prompt: string } {
+  const system = [
+    PROMPT_INJECTION_GUARD, "",
+    "You are completing a READING PLAN for a code review: an earlier pass classified most of",
+    "the PR's changed files but MISSED the files below. Classify ONLY these files.",
+    "Per file:",
+    ...CLASS_SPEC,
+    "    • \"role\" — ONE short sentence: what the file does in this change.",
+    "    • \"walkthrough\" — crux/substantive files only: 2–5 `-` markdown bullets naming the",
+    "      major functions/sections in `backticks`. Omit otherwise.",
+    "    • \"ripple\" — optional out-of-diff caller impact; omit unless real.",
+    "",
+    "Respond with ONLY a JSON object (no prose, no code fence):",
+    '{ "files": [ { "path": string, "class": "crux"|"substantive"|"boilerplate"|"mechanical",',
+    '    "role": string, "walkthrough": string, "ripple": string } ] }',
+    "Every listed path must appear exactly once. Include no other paths.",
+    "You may Read/Grep/Glob the checked-out worktree for context. Do not modify anything.",
+  ].join("\n");
+  const prompt = missing
+    .map((m) => [`File: ${m.path}`, "```diff", m.diff, "```"].join("\n"))
+    .join("\n\n");
+  return { system, prompt };
+}
+
 export interface PriorFinding {
   file: string;
   line: number | null;
@@ -103,7 +204,14 @@ export interface PriorFinding {
 
 export function buildFinalizerPrompt(
   raw: Finding[],
-  context?: { goal?: string; goalVerdict?: string; rejectedExamples?: string[]; priorFindings?: PriorFinding[] },
+  context?: {
+    goal?: string;
+    goalVerdict?: string;
+    rejectedExamples?: string[];
+    priorFindings?: PriorFinding[];
+    /** The plan stage's per-file attention classes — context for impact scoring. */
+    planFiles?: { path: string; class: string }[];
+  },
 ): { system: string; prompt: string } {
   const goalBlock = context?.goal?.trim()
     ? [
@@ -142,6 +250,18 @@ export function buildFinalizerPrompt(
         "The verdict MUST say what improved and what remains open since the previous review.",
       ]
     : [];
+  // The reading plan is built by its own stage; here it only informs impact scoring.
+  const planBlock = context?.planFiles?.length
+    ? [
+        "",
+        "The reviewer's reading plan (from an earlier stage) classifies the changed files by",
+        "attention needed — weigh impact accordingly; crux files carry the change's core:",
+        ...(["crux", "substantive", "boilerplate", "mechanical"] as const)
+          .map((cls) => ({ cls, paths: context.planFiles!.filter((f) => f.class === cls).map((f) => f.path) }))
+          .filter((g) => g.paths.length > 0)
+          .map((g) => `  ${g.cls}: ${g.paths.join(", ")}`),
+      ]
+    : [];
   const system = [
     PROMPT_INJECTION_GUARD, "",
     "You are finalizing a code review. You are given raw findings from MULTIPLE independent",
@@ -155,6 +275,7 @@ export function buildFinalizerPrompt(
     ...goalBlock,
     ...rejectedBlock,
     ...priorBlock,
+    ...planBlock,
     "",
     "For each finalized finding, set \"sources\" to which engines flagged it",
     "(the raw findings carry an \"engine\" field). \"agreement\" is true when sources has 2+ engines.",
@@ -169,49 +290,8 @@ export function buildFinalizerPrompt(
     "Also return \"verdict\": 1–2 sentences for the human reviewer — does the change achieve",
     "its goal, and what single thing most deserves their attention. Plain markdown.",
     "",
-    "Also return \"plan\": a structured READING PLAN that turns the diff into a guided review.",
-    "Group the changed files into cohorts — ordered conceptual groups read in sequence,",
-    "foundation first (e.g. schema → core logic → callers → UI → tests), NOT alphabetical.",
-    "Include EVERY changed file exactly once (paths exactly as they appear in the diff);",
-    "lockfiles and generated files belong in a mechanical cohort, not skipped. Each cohort:",
-    "  • \"label\" — a 2–4 word name (e.g. \"Schema & migrations\").",
-    "  • \"why\" — ONE sentence: what question reading this cohort answers, and why it comes",
-    "    at this point in the order.",
-    "  • \"files\" — the cohort's files in reading order. Per file:",
-    "    • \"path\" — exactly as in the diff.",
-    "    • \"class\" — how much reviewer attention the file needs:",
-    "        crux — where the real decisions live; read line by line.",
-    "        substantive — genuine behavior change; read carefully.",
-    "        boilerplate — predictable wiring/registration/config echo; skim.",
-    "        mechanical — pure renames, moves, formatting, generated output, lockfiles —",
-    "        you verified there is NO behavior change.",
-    "      BE CONSERVATIVE: if ANY hunk in the file changes behavior, the file is at least",
-    "      substantive. When unsure, say substantive — never mechanical. The UI collapses",
-    "      boilerplate/mechanical files, so a wrong tag hides real logic from the reviewer.",
-    "    • \"role\" — ONE short sentence: what the file does in this change and how it connects",
-    "      to the others. For boilerplate/mechanical files this is the justification for",
-    "      skimming (e.g. \"rename `FooService`→`BarService` — no logic change\").",
-    "    • \"walkthrough\" — crux/substantive files only: a compact markdown tour of the",
-    "      file's changes: 2–5 `-` bullets, each naming a major function/class/section in",
-    "      `backticks`, what it tries to do, and — when findings touch it — a brief clause",
-    "      on what's wrong. Example bullet:",
-    "      \"- `purgeOrphanWorktrees()` deletes worktrees not referenced by an active PR at",
-    "      startup — but its status filter runs after reconcile, so it deletes ALL worktrees.\"",
-    "      Keep problem clauses to one line (the findings carry the detail). Omit for",
-    "      boilerplate/mechanical files.",
-    "    • \"ripple\" — OPTIONAL out-of-diff impact note. When the file changes an exported/",
-    "      public signature, contract, or shared behavior, Grep the worktree for call sites",
-    "      OUTSIDE this diff. If un-updated callers could now misbehave, say which",
-    "      (`path:line`) and what assumption breaks — 1–3 short markdown lines. This flags",
-    "      what existing code the change might break, which the diff alone cannot show.",
-    "      OMIT the field entirely when nothing outside the diff is affected — most files",
-    "      have no ripple, and a noisy ripple note is worse than none.",
-    "",
     "Return ONLY a JSON object (no prose, no fence):",
     '{ "verdict": string,',
-    '  "plan": { "cohorts": [ { "label": string, "why": string, "files": [',
-    '      { "path": string, "class": "crux"|"substantive"|"boilerplate"|"mechanical",',
-    '        "role": string, "walkthrough": string, "ripple": string } ] } ] },',
     '  "findings": [ {',
     '  "dimension": string, "severity": "blocking"|"serious"|"moderate"|"optional",',
     '  "impact": "high"|"medium"|"low",',

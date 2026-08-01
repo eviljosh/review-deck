@@ -9,7 +9,8 @@ import { WsHub } from "../src/server/ws.ts";
 import { buildApp } from "../src/server/app.ts";
 import { DEFAULT_REVIEW_CONFIG } from "../src/server/review-config.ts";
 
-const triageJson = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] }, focusAreas: [] });
+const triageJson = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] } });
+const planJson = JSON.stringify({ cohorts: [{ label: "All", why: "", files: [{ path: "x", class: "substantive", role: "r" }] }] });
 const findingsJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f" }] });
 const finalJson = JSON.stringify({ findings: [{ dimension: "correctness", severity: "moderate", file: "x", line: 1, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude"], agreement: false }] });
 
@@ -30,12 +31,12 @@ function deps() {
   const claude: LlmEngine = {
     name: "claude",
     run: async (req) =>
-      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : findingsJson }),
+      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : req.system.includes("READING PLAN") ? planJson : findingsJson }),
   };
   const codex: LlmEngine = {
     name: "codex",
     run: async (req) =>
-      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : findingsJson }),
+      ({ text: req.system.includes("triaging") ? triageJson : req.system.includes("finalizing") ? finalJson : req.system.includes("READING PLAN") ? planJson : findingsJson }),
   };
   return {
     db: openDb(":memory:"), exec, claude, codex, config: DEFAULT_REVIEW_CONFIG,
@@ -148,7 +149,7 @@ test("claudeTransport=cli routes pipeline Claude calls through the CLI engine", 
   let cliRuns = 0;
   let sdkRuns = 0;
   const answer = (system: string) =>
-    system.includes("triaging") ? triageJson : system.includes("finalizing") ? finalJson : findingsJson;
+    system.includes("triaging") ? triageJson : system.includes("finalizing") ? finalJson : system.includes("READING PLAN") ? planJson : findingsJson;
   d.claude = { name: "claude", run: async (req) => { sdkRuns++; return { text: answer(req.system) }; } };
   const cliFake: typeof d.claude = { name: "claude", run: async (req) => { cliRuns++; return { text: answer(req.system) }; } };
   const app = buildApp({ ...d, claudeCli: cliFake });
@@ -777,7 +778,7 @@ test("GET /api/prs/:id/runs returns per-stage runs once the pipeline reaches rea
   const runs = res.json();
   // Top-level stages (sub-runs like "deep_review · claude/correctness" are excluded).
   const stages = runs.map((r: { stage: string }) => r.stage).filter((s: string) => !s.includes("·"));
-  assert.deepEqual(stages, ["prepare", "triage", "deep_review", "synthesize"]);
+  assert.deepEqual(stages, ["prepare", "triage", "plan", "deep_review", "synthesize"]);
   // Deep review records a per-engine sub-run so the timeline shows what ran.
   const subRuns = runs.map((r: { stage: string }) => r.stage).filter((s: string) => s.includes("·"));
   assert.ok(subRuns.some((s: string) => s.includes("codex/full")), "expected a codex sub-run");

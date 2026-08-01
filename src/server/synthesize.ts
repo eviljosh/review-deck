@@ -11,22 +11,8 @@ import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
 
-const planFileSchema = z.object({
-  path: z.string(),
-  // Tolerate a missing class (normalized to "substantive" — the safe default).
-  class: z.enum(["crux", "substantive", "boilerplate", "mechanical"]).optional(),
-  role: z.string(),
-  walkthrough: z.string().optional(),
-  ripple: z.string().optional(),
-});
-
 const finalSchema = z.object({
   verdict: z.string().optional(),
-  plan: z.object({
-    cohorts: z.array(z.object({ label: z.string(), why: z.string().optional(), files: z.array(planFileSchema) })),
-  }).optional(),
-  // Legacy flat reading guide — accepted as a fallback if the model returns the old shape.
-  files: z.array(z.object({ path: z.string(), role: z.string(), walkthrough: z.string().optional() })).optional(),
   findings: z.array(z.object({
     dimension: z.string(),
     severity: z.enum(["blocking", "serious", "moderate", "optional"]),
@@ -59,27 +45,16 @@ export interface SynthesizeDeps {
   effort?: EffortLevel;
 }
 
-// File paths changed by a unified diff (new-side names).
-function diffPaths(diff: string): Set<string> {
-  const out = new Set<string>();
-  for (const m of diff.matchAll(/^diff --git a\/.* b\/(.+)$/gm)) out.add(m[1]);
-  return out;
-}
-
-// Overload telemetry: "include EVERY changed file" is the first instruction a
-// model drops when the finalizer is asked for too much in one response, and
-// it's mechanically checkable. A logged gap here is the signal to consider
-// splitting the plan into its own stage.
-function planCoverageReport(plan: ReadingPlan, diff: string): string | null {
-  const changed = diffPaths(diff);
-  const planned = new Set(plan.cohorts.flatMap((c) => c.files.map((f) => f.path)));
-  const missing = [...changed].filter((p) => !planned.has(p));
-  const invented = [...planned].filter((p) => !changed.has(p));
-  if (missing.length === 0 && invented.length === 0) return null;
-  const parts = [`plan coverage gap (${planned.size} planned / ${changed.size} changed)`];
-  if (missing.length) parts.push(`missing from plan: ${missing.join(", ")}`);
-  if (invented.length) parts.push(`not in diff: ${invented.join(", ")}`);
-  return parts.join(" — ");
+// The plan stage's per-file classes, as compact context for impact scoring.
+function parsePlanFiles(json: string | null): { path: string; class: string }[] | undefined {
+  if (!json) return undefined;
+  try {
+    const plan = JSON.parse(json) as ReadingPlan;
+    const files = plan?.cohorts?.flatMap((c) => c.files.map((f) => ({ path: f.path, class: f.class })));
+    return files?.length ? files : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Snapshot of the previous posted review (taken at re-run time); best-effort parse.
@@ -121,6 +96,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       goalVerdict: pr.goal_verdict ?? undefined,
       ...(deps.feedbackEnabled ? { rejectedExamples: listRejectedExamples(db, pr.owner, pr.repo) } : {}),
       priorFindings: parsePriorFindings(pr.prior_findings),
+      planFiles: parsePlanFiles(pr.reading_plan),
     });
     const res = await finalizer.run(
       {
@@ -145,36 +121,6 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       return degraded;
     }
 
-    // The reading plan, normalized: missing classes default to "substantive"
-    // (the safe tag — never auto-collapse what the model didn't classify). The
-    // legacy flat "files" shape degrades to a single unlabeled cohort.
-    const cohorts = (parsed.value.plan?.cohorts ?? []).filter((c) => c.files.length > 0);
-    const plan: ReadingPlan | null = cohorts.length
-      ? {
-          cohorts: cohorts.map((c) => ({
-            label: c.label,
-            why: c.why ?? "",
-            files: c.files.map((f) => ({
-              path: f.path,
-              class: f.class ?? "substantive",
-              role: f.role,
-              ...(f.walkthrough?.trim() ? { walkthrough: f.walkthrough } : {}),
-              ...(f.ripple?.trim() ? { ripple: f.ripple } : {}),
-            })),
-          })),
-        }
-      : parsed.value.files?.length
-        ? { cohorts: [{ label: "", why: "", files: parsed.value.files.map((f) => ({ ...f, class: "substantive" as const })) }] }
-        : null;
-    // Flat guide kept in sync for anything still reading file_guide (old UI sessions, copy-review).
-    const flatGuide = plan?.cohorts.flatMap((c) => c.files.map(({ path, role, walkthrough }) => ({ path, role, ...(walkthrough ? { walkthrough } : {}) }))) ?? [];
-
-    const coverage = plan ? planCoverageReport(plan, diff) : "no reading plan returned";
-    if (coverage) {
-      onLog?.(prId, "synthesize", `[synthesize] ⚠ ${coverage}\n`);
-      writeArtifacts(dir, { "plan-coverage.txt": coverage });
-    }
-
     const finalFindings = parsed.value.findings.map((f) => {
       const agreement = f.agreement || f.sources.length >= 2;
       return {
@@ -195,8 +141,6 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
     const done = updatePr(db, prId, {
       stage: "ready", status: "done",
       review_verdict: parsed.value.verdict?.trim() ? parsed.value.verdict : null,
-      reading_plan: plan ? JSON.stringify(plan) : null,
-      file_guide: flatGuide.length ? JSON.stringify(flatGuide) : null,
     });
     onUpdate(done);
     return done;

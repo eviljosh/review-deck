@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildTriagePrompt, buildDimensionReviewPrompt, buildFullDiffReviewPrompt, buildFinalizerPrompt, PROMPT_INJECTION_GUARD } from "../src/server/prompts.ts";
+import { buildTriagePrompt, buildDimensionReviewPrompt, buildFullDiffReviewPrompt, buildFinalizerPrompt, buildPlanPrompt, buildPlanRetryPrompt, PROMPT_INJECTION_GUARD } from "../src/server/prompts.ts";
 
 test("buildTriagePrompt embeds rubric, JSON contract, metadata, and diff", () => {
   const { system, prompt } = buildTriagePrompt(
@@ -46,22 +46,62 @@ test("buildTriagePrompt asks for a headline and embeds PR body + Linear context"
   assert.match(prompt, /ENG-42/);
 });
 
-test("buildFinalizerPrompt asks for a cohort reading plan with attention classes", () => {
-  const { system } = buildFinalizerPrompt([]);
-  assert.match(system, /"plan"/);
+test("buildPlanPrompt asks for cohorts with attention classes over an explicit file list", () => {
+  const { system, prompt } = buildPlanPrompt(
+    { title: "Add retries", additions: 40, deletions: 8 },
+    "diff --git a/x.ts b/x.ts\n+1",
+    ["x.ts", "y.ts"],
+    "Ship the retry path",
+  );
+  assert.match(system, /READING PLAN/);
   assert.match(system, /cohorts/i);
   assert.match(system, /"class": "crux"\|"substantive"\|"boilerplate"\|"mechanical"/);
   // conservative-classification guardrail
   assert.match(system, /never mechanical/i);
-  // every changed file must appear in the plan
-  assert.match(system, /EVERY changed file/i);
+  // the file list is authoritative — classify every path, invent none
+  assert.match(system, /Classify EVERY/);
+  assert.match(system, /Do NOT include any path that is not on the list/);
   // ripple notes: out-of-diff caller impact, explicitly optional
   assert.match(system, /"ripple"/);
   assert.match(system, /OUTSIDE this diff/);
-  assert.match(system, /OMIT the field/i);
-  // themes were deprecated in favor of cohorts
+  assert.match(system, /OMIT the/);
+  // the prompt carries the numbered list, the intent, and the diff
+  assert.match(prompt, /Changed files \(2/);
+  assert.match(prompt, /1\. x\.ts/);
+  assert.match(prompt, /2\. y\.ts/);
+  assert.match(prompt, /Ship the retry path/);
+  assert.match(prompt, /diff --git/);
+});
+
+test("buildPlanRetryPrompt targets only the missed files with their diff sections", () => {
+  const { system, prompt } = buildPlanRetryPrompt([
+    { path: "y.ts", diff: "diff --git a/y.ts b/y.ts\n+export const c=3;" },
+  ]);
+  assert.match(system, /MISSED/);
+  assert.match(system, /Every listed path must appear exactly once/);
+  assert.match(prompt, /File: y\.ts/);
+  assert.match(prompt, /export const c=3/);
+});
+
+test("buildFinalizerPrompt no longer asks for the reading plan (owned by the plan stage)", () => {
+  const { system } = buildFinalizerPrompt([]);
+  assert.doesNotMatch(system, /"plan"/);
+  assert.doesNotMatch(system, /"cohorts"/);
   assert.doesNotMatch(system, /"themes"/);
   assert.doesNotMatch(system, /"theme": string/);
+});
+
+test("buildFinalizerPrompt embeds the plan's classes as impact context when provided", () => {
+  const { system } = buildFinalizerPrompt([], {
+    planFiles: [
+      { path: "a.ts", class: "crux" },
+      { path: "b.ts", class: "mechanical" },
+    ],
+  });
+  assert.match(system, /reading plan/i);
+  assert.match(system, /crux: a\.ts/);
+  assert.match(system, /mechanical: b\.ts/);
+  assert.doesNotMatch(buildFinalizerPrompt([]).system, /reading plan/i);
 });
 
 test("every review/triage/finalizer prompt carries the prompt-injection guard", () => {
