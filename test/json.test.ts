@@ -48,3 +48,29 @@ test("handles nested objects and braces inside string values", () => {
   assert.equal(r.ok, true);
   assert.equal(r.ok && r.value.a.b, 1);
 });
+
+test("repairs output truncated before the final closing brace", () => {
+  // Observed in the wild: a complete plan missing only the root '}'.
+  const nested = z.object({ cohorts: z.array(z.object({ label: z.string(), files: z.array(z.object({ path: z.string() })) })) });
+  const r = parseAgentJson('{"cohorts":[{"label":"Core","files":[{"path":"x.ts"}]}]', nested);
+  assert.equal(r.ok, true);
+  assert.equal(r.ok && r.value.cohorts[0].files[0].path, "x.ts");
+});
+
+test("repairs output truncated mid-array with several closers missing", () => {
+  const nested = z.object({ items: z.array(z.object({ n: z.number() })) });
+  const r = parseAgentJson('prose first {"items":[{"n":1},{"n":2}', nested);
+  assert.equal(r.ok, true);
+  assert.equal(r.ok && r.value.items.length, 2);
+});
+
+test("repairs output truncated inside a string value", () => {
+  const s = z.object({ msg: z.string() });
+  const r = parseAgentJson('{"msg":"cut off here', s);
+  assert.equal(r.ok, true);
+  assert.equal(r.ok && r.value.msg, "cut off here");
+});
+
+test("repair does not resurrect mismatched-bracket garbage", () => {
+  assert.equal(parseAgentJson('{"a": [1}', z.object({ a: z.array(z.number()) })).ok, false);
+});
