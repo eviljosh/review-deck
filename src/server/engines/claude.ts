@@ -11,7 +11,12 @@ import {
 import { withTimeout } from "./with-timeout.ts";
 
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh pr *)"];
-const DENY_TOOLS = ["Edit", "Write", "Bash(git push *)"];
+// ReportFindings is denied, not because it writes anything, but because its
+// schema is not ours: an agent that reports through it emits `summary`/
+// `failure_scenario` and no `side`, which used to fail the parse and drop every
+// finding in that lane. The prompts forbid it too, and the parser normalizes it
+// if one slips through — this is the first of the three lines of defense.
+const DENY_TOOLS = ["Edit", "Write", "Bash(git push *)", "ReportFindings"];
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 // Adapt the real SDK query to our structural QueryFn.

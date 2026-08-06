@@ -37,6 +37,7 @@ export interface PreparedWorktree {
   path: string;
   headSha: string | null; // resolved PR head ("" from a failed rev-parse → null)
   baseSha: string | null; // merge-base against the PR's base branch, when known
+  baseTipSha: string | null; // current tip of the PR's base branch, when known
 }
 
 export async function prepareWorktree(
@@ -95,6 +96,7 @@ export async function prepareWorktree(
     // would clobber them the moment we release it.
     let headSha: string | null = null;
     let baseSha: string | null = null;
+    let baseTipSha: string | null = null;
     try {
       headSha = (await exec("git", ["-C", cache, "rev-parse", "FETCH_HEAD"])).stdout.trim() || null;
     } catch {
@@ -106,8 +108,16 @@ export async function prepareWorktree(
       } catch {
         // unknown base branch — leave null
       }
+      // The tip too: for a stacked PR whose base branch was rebased after this
+      // branch forked, the merge-base is a bad base and the tip is the right one.
+      // pickPinnedBase() decides between them; resolve both under the repo lock.
+      try {
+        baseTipSha = (await exec("git", ["-C", cache, "rev-parse", `origin/${opts.baseRef}`])).stdout.trim() || null;
+      } catch {
+        // unknown base branch — leave null
+      }
     }
-    return { path: wt, headSha, baseSha };
+    return { path: wt, headSha, baseSha, baseTipSha };
   };
 
   return withRepoLock(cache, body);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createPrBodySchema, prUrlSchema, dangerRatingSchema, triageResultSchema, findingSchema, findingsArraySchema } from "../src/shared/types.ts";
+import { createPrBodySchema, prUrlSchema, dangerRatingSchema, triageResultSchema, findingSchema, findingsArraySchema, normalizeAgentFinding } from "../src/shared/types.ts";
 
 test("prUrlSchema accepts a valid PR url", () => {
   const r = prUrlSchema.safeParse("https://github.com/plenful/plenful/pull/6727");
@@ -79,4 +79,34 @@ test("findingSchema rejects an unknown severity", () => {
     engine: "claude", dimension: "correctness", severity: "spicy",
     file: "x", line: null, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: false,
   }).success, false);
+});
+
+test("normalizeAgentFinding maps ReportFindings field names and fills the fields it has no counterpart for", () => {
+  const out = normalizeAgentFinding({
+    file: "a.py", line: 12, category: "correctness",
+    summary: "s", failure_scenario: "fs",
+  }) as Record<string, unknown>;
+  assert.equal(out.what, "s");
+  assert.equal(out.why, "fs");
+  assert.equal(out.dimension, "correctness");
+  assert.equal(out.side, "RIGHT");
+  assert.equal(out.severity, "moderate");
+  assert.equal(out.suggestedFix, "");
+  assert.equal(out.line, 12);
+});
+
+test("normalizeAgentFinding never overwrites what the agent supplied", () => {
+  const supplied = {
+    dimension: "security", severity: "blocking", file: "a.py", line: null, side: "LEFT",
+    what: "w", why: "y", suggestedFix: "f",
+    // Aliases present too — the contract fields must still win.
+    summary: "ignored", failure_scenario: "ignored", category: "ignored",
+  };
+  assert.deepEqual(normalizeAgentFinding(supplied), supplied);
+});
+
+test("normalizeAgentFinding passes non-objects through untouched", () => {
+  assert.equal(normalizeAgentFinding(null), null);
+  assert.equal(normalizeAgentFinding("nope"), "nope");
+  assert.deepEqual(normalizeAgentFinding([1, 2]), [1, 2]);
 });

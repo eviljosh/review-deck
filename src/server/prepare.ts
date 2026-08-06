@@ -5,6 +5,7 @@ import { getPr, updatePr } from "./db.ts";
 import { fetchPrMeta, fetchPrDiff, fetchPrStatus } from "./gh.ts";
 import { cachePath, prepareWorktree } from "./repos.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
+import { baseDriftFiles, diffPaths, diffStats, dropDiffFiles, pickPinnedBase, type BaseCandidate, type BaseMode } from "./diff.ts";
 
 export interface PrepareDeps {
   db: Database.Database;
@@ -54,10 +55,62 @@ export async function runPrepare(deps: PrepareDeps, prId: number): Promise<PrRec
     // (and the final post) reviews the same code even if the author pushes.
     // Best-effort: on any failure the stages fall back to a live `gh pr diff`.
     let diff = "";
+    let baseSha = worktree.baseSha;
+    let baseMode: BaseMode | null = null;
     if (worktree.headSha && worktree.baseSha) {
+      const cache = cachePath(dataDir, pr.owner, pr.repo);
+      const head = worktree.headSha;
+      const diffFrom = async (base: string): Promise<string> =>
+        (await exec("git", ["-C", cache, "diff", `${base}..${head}`])).stdout;
+      // File count only: the tip candidate usually loses (a base branch that
+      // merely advanced makes the tip diff the *larger* of the two), and its
+      // full text can run to tens of MB on a busy base — never materialize a
+      // diff we would throw away unread.
+      const filesTouchedFrom = async (base: string): Promise<number> =>
+        (await exec("git", ["-C", cache, "diff", "--name-only", `${base}..${head}`])).stdout
+          .split("\n").filter(Boolean).length;
       try {
-        diff = (await exec("git", ["-C", cachePath(dataDir, pr.owner, pr.repo), "diff", `${worktree.baseSha}..${worktree.headSha}`])).stdout;
-        log(`[prepare] pinned diff at ${worktree.headSha.slice(0, 8)} (base ${worktree.baseSha.slice(0, 8)})\n`);
+        const mergeBaseDiff = await diffFrom(worktree.baseSha);
+        const mergeBase: BaseCandidate = { sha: worktree.baseSha, files: diffPaths(mergeBaseDiff).length };
+        // Measure the base branch's tip as well, so pickPinnedBase() can catch a
+        // stacked PR whose base was rebased out from under it.
+        let baseTip: BaseCandidate | null = null;
+        if (worktree.baseTipSha && worktree.baseTipSha !== worktree.baseSha) {
+          try {
+            baseTip = { sha: worktree.baseTipSha, files: await filesTouchedFrom(worktree.baseTipSha) };
+          } catch {
+            // tip unreachable (shallow/pruned ref) — merge-base is all we have
+          }
+        }
+        const picked = pickPinnedBase(mergeBase, baseTip);
+        diff = picked.mode === "base-tip" ? await diffFrom(picked.sha) : mergeBaseDiff;
+        baseSha = picked.sha;
+        baseMode = picked.mode;
+        if (baseTip) {
+          log(`[prepare] base candidates: merge-base ${mergeBase.sha.slice(0, 8)} → ${mergeBase.files} file(s); `
+            + `base tip ${baseTip.sha.slice(0, 8)} → ${baseTip.files} file(s)\n`);
+        }
+        if (picked.mode === "base-tip") {
+          log("[prepare] using the base branch tip: its merge-base diff carries the base branch's own work, "
+            + "which means the base was rebased after this branch forked\n");
+          // Two-dot against the tip shows base commits the head never absorbed
+          // as reversals. Strip the files that are only in the diff for that
+          // reason, so nobody reviews the base branch's work played backwards.
+          try {
+            const baseOnly = (await exec("git", ["-C", cache, "log", "--format=", "--name-only", picked.sha, `^${head}`])).stdout;
+            const prTouched = (await exec("git", ["-C", cache, "diff", "--name-only", mergeBase.sha, head])).stdout;
+            const drift = baseDriftFiles(baseOnly, prTouched);
+            if (drift.size > 0) {
+              diff = dropDiffFiles(diff, drift);
+              log(`[prepare] dropped ${drift.size} base-drift file(s) the PR never touched: ${[...drift].join(", ")}\n`);
+            }
+          } catch {
+            // Best-effort: an unfiltered base-tip diff still beats the merge-base one.
+            log("[prepare] could not compute base drift — keeping the unfiltered base-tip diff\n");
+          }
+        }
+        log(`[prepare] pinned diff at ${head.slice(0, 8)} (${picked.mode} ${picked.sha.slice(0, 8)}) — `
+          + `${diffPaths(diff).length} file(s)\n`);
       } catch {
         log(`[prepare] local diff failed — will fall back to gh pr diff\n`);
       }
@@ -90,7 +143,12 @@ export async function runPrepare(deps: PrepareDeps, prId: number): Promise<PrRec
       checks: status.checks,
       worktree_path: worktree.path,
       head_sha: worktree.headSha,
-      base_sha: worktree.baseSha,
+      base_sha: baseSha,
+      base_mode: baseMode,
+      // What was actually reviewed. GitHub's counters describe a different
+      // change whenever they go stale or we pick a different base, and the
+      // review brief should quote the diff the review was done on.
+      reviewed_size: diff ? JSON.stringify(diffStats(diff)) : null,
       latest_sha: status.headSha || worktree.headSha,
       stage: "triage",
       status: "pending",

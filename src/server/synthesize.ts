@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Exec } from "./exec.ts";
 import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts";
 import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
+import { lenientFinding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
@@ -13,9 +14,13 @@ import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
 
+// Same leniency as deep review: the finalizer can route through `ReportFindings`
+// too, and a parse failure here degrades the whole review to unmerged raw
+// findings. `sources`/`agreement` have no counterpart in that tool's schema, so
+// they fall back to "unknown" rather than sinking the parse.
 const finalSchema = z.object({
   verdict: z.string().optional(),
-  findings: z.array(z.object({
+  findings: z.array(lenientFinding(z.object({
     dimension: z.string(),
     severity: z.enum(["blocking", "serious", "moderate", "optional"]),
     impact: z.enum(["high", "medium", "low"]).optional(),
@@ -25,9 +30,9 @@ const finalSchema = z.object({
     what: z.string(),
     why: z.string(),
     suggestedFix: z.string(),
-    sources: z.array(z.string()),
-    agreement: z.boolean(),
-  })),
+    sources: z.array(z.string()).default([]),
+    agreement: z.boolean().default(false),
+  }))),
 });
 
 export interface SynthesizeDeps {

@@ -5,17 +5,17 @@ import { z } from "zod";
 import type { Exec } from "./exec.ts";
 import type { LlmEngine, LogSink } from "./engines/types.ts";
 import type { PrRecord, Finding } from "../shared/types.ts";
-import { findingSchema } from "../shared/types.ts";
+import { findingSchema, lenientFinding } from "../shared/types.ts";
 import { engineModelOptions, parseDimensions, type ReviewConfig } from "./review-config.ts";
 import { getPr, getRepoConfig, updatePr, startRun, finishRun } from "./db.ts";
 import { fetchPrMeta } from "./gh.ts";
-import { getPinnedDiff } from "./diff.ts";
+import { getPinnedDiff, baseLabel } from "./diff.ts";
 import { buildDimensionReviewPrompt, buildFullDiffReviewPrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 
 const rawFindingsSchema = z.object({
-  findings: z.array(findingSchema.omit({ engine: true, anchorable: true })),
+  findings: z.array(lenientFinding(findingSchema.omit({ engine: true, anchorable: true }))),
 });
 
 export interface DeepReviewDeps {
@@ -61,15 +61,19 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
     const dimensions = parseDimensions(repoCfg?.dimensions) ?? config.dimensions;
     const guidance = repoCfg?.guidance?.trim() || undefined;
 
+    // Reviewers see the base the diff was taken against, so a size mismatch with
+    // GitHub's counters reads as a deliberate choice rather than a broken diff.
+    const promptMeta = { ...meta, baseLabel: baseLabel(pr) };
+
     const tasks: ReviewTask[] = [];
     if (config.engines.claude) {
       for (const dim of dimensions) {
-        const { system, prompt } = buildDimensionReviewPrompt(dim, meta, diff, intent, guidance);
+        const { system, prompt } = buildDimensionReviewPrompt(dim, promptMeta, diff, intent, guidance);
         tasks.push({ engine: claude, engineName: "claude", dimension: dim.key, system, prompt });
       }
     }
     if (config.engines.codex) {
-      const { system, prompt } = buildFullDiffReviewPrompt(meta, diff, intent, guidance);
+      const { system, prompt } = buildFullDiffReviewPrompt(promptMeta, diff, intent, guidance);
       tasks.push({ engine: codex, engineName: "codex", dimension: "full", system, prompt });
     }
 
