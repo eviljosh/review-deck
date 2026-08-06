@@ -30,6 +30,17 @@ function parseFlow(json: string | null): FlowDelta | null {
   }
 }
 
+function parseReviewedSize(json: string | null): { additions: number; deletions: number; changedFiles: number } | null {
+  if (!json) return null;
+  try {
+    const p = JSON.parse(json) as { additions?: number; deletions?: number; changedFiles?: number };
+    if (typeof p?.changedFiles !== "number") return null;
+    return { additions: p.additions ?? 0, deletions: p.deletions ?? 0, changedFiles: p.changedFiles };
+  } catch {
+    return null;
+  }
+}
+
 const GOAL_VERDICT_TEXT: Record<string, string> = {
   achieves: "achieves the goal",
   partially: "partially achieves the goal",
@@ -58,7 +69,13 @@ export function buildReviewMarkdown(
   lines.push("");
   lines.push(`- PR: ${pr.url}`);
   if (pr.author) lines.push(`- Author: ${pr.author}`);
-  if (pr.additions != null || pr.deletions != null) {
+  // Size of the diff the review was actually done on, not GitHub's counters:
+  // those go stale while a PR is conflicted, and they describe a different base
+  // whenever prepare picks the base branch tip over the merge-base.
+  const reviewed = parseReviewedSize(pr.reviewed_size);
+  if (reviewed) {
+    lines.push(`- Size: +${reviewed.additions}/-${reviewed.deletions} across ${reviewed.changedFiles} file(s)`);
+  } else if (pr.additions != null || pr.deletions != null) {
     lines.push(`- Size: +${pr.additions ?? 0}/-${pr.deletions ?? 0} across ${pr.changed_files ?? "?"} file(s)`);
   }
   if (pr.head_sha) {

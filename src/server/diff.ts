@@ -102,6 +102,51 @@ export function pickPinnedBase(
   return chosen;
 }
 
+/**
+ * Files a base-tip diff carries only because the base branch moved on.
+ *
+ * Diffing two-dot against the base branch tip renders base commits the head
+ * never absorbed as *reversals*: the base's own work, played backwards, framed
+ * as this PR's doing. On plenful#7218 that was 3 of 8 files, and a reviewer
+ * dutifully filed a moderate finding accusing the PR of an "undescribed
+ * behavior change" that was in fact one base commit inverted.
+ *
+ * A file is drift when both hold:
+ *   • some base commit the head lacks touched it, and
+ *   • the PR itself never touched it (unchanged between merge-base and head).
+ * The second condition is what keeps real work from being filtered away when a
+ * PR and its base edit the same file — then the reversal noise is entangled
+ * with genuine changes and dropping the file would hide the PR's own edits.
+ *
+ * Both arguments are raw newline-separated `git` path output.
+ */
+export function baseDriftFiles(touchedByUnabsorbedBaseCommits: string, touchedByPr: string): Set<string> {
+  const lines = (raw: string): string[] => raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  const prTouched = new Set(lines(touchedByPr));
+  return new Set(lines(touchedByUnabsorbedBaseCommits).filter((f) => !prTouched.has(f)));
+}
+
+/** `diff` with every section for a path in `drop` removed. */
+export function dropDiffFiles(diff: string, drop: ReadonlySet<string>): string {
+  if (drop.size === 0) return diff;
+  return diff
+    .split(/^(?=diff --git )/m)
+    .filter((part) => {
+      const m = /^diff --git a\/.* b\/(.+)$/m.exec(part);
+      return !m || !drop.has(m[1]);
+    })
+    .join("");
+}
+
+/** How to describe, to a reviewing agent, the base a pinned diff was taken against. */
+export function baseLabel(pr: Pick<PrRecord, "base_mode" | "base_sha">): string | undefined {
+  if (!pr.base_sha) return undefined;
+  const sha = pr.base_sha.slice(0, 8);
+  return pr.base_mode === "base-tip"
+    ? `the tip of the PR's base branch (\`${sha}\`)`
+    : `the merge-base with the PR's base branch (\`${sha}\`)`;
+}
+
 /** Per-file segments of a unified diff, keyed by new-side path. */
 export function diffSections(diff: string): Map<string, string> {
   const map = new Map<string, string>();

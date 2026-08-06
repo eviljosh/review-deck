@@ -164,6 +164,7 @@ export interface PrRecord {
   head_sha: string | null;       // PR head commit the review was pinned to (set at prepare)
   base_sha: string | null;       // base commit the pinned diff was computed against (see base_mode)
   base_mode: string | null;      // "merge-base" (normal) | "base-tip" (base branch was rebased under a stacked PR)
+  reviewed_size: string | null;  // JSON {additions,deletions,changedFiles} measured on the pinned diff
   latest_sha: string | null;     // most recently observed remote head (staleness signal)
   goal: string | null;           // triage: what problem / functionality this PR targets
   goal_verdict: string | null;   // triage: achieves | partially | does-not | unclear

@@ -225,8 +225,19 @@ test("size line is measured from the diff, not from GitHub's counters", () => {
     assert.doesNotMatch(prompt, /Size: \+1656/);
     // and the mismatch is called out rather than left for the agent to puzzle over
     assert.match(prompt, /GitHub's PR summary reports \+1656\/-16 across 11 file\(s\)/);
-    assert.match(prompt, /authoritative/);
+    assert.match(prompt, /is the code under review/);
   }
+});
+
+test("the mismatch note names the base the diff was computed against", () => {
+  const meta = {
+    title: "T", author: "u", additions: 1656, deletions: 16, changedFiles: 11,
+    baseLabel: "the tip of the PR's base branch (`52cfc030`)",
+  };
+  const diff = "diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n+a\n+b\n-c";
+  const { prompt } = buildFullDiffReviewPrompt(meta, diff);
+  // Without this the reviewer can't tell a deliberate base choice from a broken diff.
+  assert.match(prompt, /computed locally against the tip of the PR's base branch \(`52cfc030`\)/);
 });
 
 test("no mismatch note when GitHub's file count agrees with the diff", () => {

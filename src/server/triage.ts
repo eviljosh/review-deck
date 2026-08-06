@@ -6,7 +6,7 @@ import { triageResultSchema } from "../shared/types.ts";
 import { getPr, getRepoConfig, updatePr } from "./db.ts";
 import { parseRiskFlags, DEFAULT_RISK_FLAGS, type RiskFlagDef } from "./review-config.ts";
 import { fetchPrMeta, fetchPrDiscussion } from "./gh.ts";
-import { getPinnedDiff } from "./diff.ts";
+import { getPinnedDiff, baseLabel } from "./diff.ts";
 import { fetchLinearContext } from "./linear.ts";
 import { buildTriagePrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
@@ -60,7 +60,7 @@ export async function runTriage(deps: TriageDeps, prId: number): Promise<PrRecor
     const repoCfg = getRepoConfig(db, pr.owner, pr.repo);
     const riskFlags = parseRiskFlags(repoCfg?.risk_flags) ?? deps.riskFlags ?? DEFAULT_RISK_FLAGS;
     const guidance = repoCfg?.guidance?.trim() || undefined;
-    const { system, prompt } = buildTriagePrompt(meta, diff, discussion, linear, riskFlags, guidance);
+    const { system, prompt } = buildTriagePrompt({ ...meta, baseLabel: baseLabel(pr) }, diff, discussion, linear, riskFlags, guidance);
 
     let log = "";
     const result = await engine.run(

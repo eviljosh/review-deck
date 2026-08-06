@@ -4,7 +4,7 @@ import type { Exec } from "./exec.ts";
 import type { LlmEngine } from "./engines/types.ts";
 import type { PlanFile, PrRecord, ReadingPlan } from "../shared/types.ts";
 import { getPr, getRepoConfig, updatePr } from "./db.ts";
-import { getPinnedDiff, diffPaths, diffSections } from "./diff.ts";
+import { getPinnedDiff, diffPaths, diffSections, baseLabel } from "./diff.ts";
 import { buildPlanPrompt, buildPlanRetryPrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
@@ -77,7 +77,7 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
   const guidance = getRepoConfig(db, pr.owner, pr.repo)?.guidance?.trim() || undefined;
 
   const { system, prompt } = buildPlanPrompt(
-    { title: pr.title ?? "", additions: pr.additions ?? 0, deletions: pr.deletions ?? 0, changedFiles: pr.changed_files ?? 0 },
+    { title: pr.title ?? "", additions: pr.additions ?? 0, deletions: pr.deletions ?? 0, changedFiles: pr.changed_files ?? 0, baseLabel: baseLabel(pr) },
     diff, changed, intent, guidance,
   );
 

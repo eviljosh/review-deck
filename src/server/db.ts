@@ -130,6 +130,7 @@ const NEW_PR_COLUMNS: [string, string][] = [
   ["prior_findings", "TEXT"],
   ["claude_transport", "TEXT"],
   ["base_mode", "TEXT"],
+  ["reviewed_size", "TEXT"],
 ];
 
 export function migrate(db: Database.Database): void {
@@ -288,7 +289,7 @@ const PR_COLUMNS = new Set([
   "summary", "danger_level", "danger_reasons", "focus_areas", "danger_flags", "discussion",
   "headline", "finding_themes", "preface",
   "pr_state", "mergeable", "review_decision", "checks",
-  "head_sha", "base_sha", "base_mode", "latest_sha",
+  "head_sha", "base_sha", "base_mode", "reviewed_size", "latest_sha",
   "goal", "goal_verdict", "goal_explanation", "goal_gaps", "review_verdict",
   "file_guide", "reading_plan", "reviewed_files", "flow_delta", "prior_findings", "claude_transport",
 ]);

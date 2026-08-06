@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, insertPr } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
-import { getPinnedDiff, diffStats, pickPinnedBase } from "../src/server/diff.ts";
+import { getPinnedDiff, diffStats, pickPinnedBase, baseDriftFiles, dropDiffFiles, baseLabel, diffPaths } from "../src/server/diff.ts";
 import { stageArtifactDir, writeArtifacts } from "../src/server/artifacts.ts";
 
 function seed() {
@@ -87,3 +87,45 @@ for (const [name, mbSha, tipSha, mbFiles, tipFiles, expected] of basePickCases) 
     assert.equal(picked.diff, want.diff);
   });
 }
+
+test("baseDriftFiles keeps files the PR also touched, drops the rest", () => {
+  const baseOnly = "a.py\nb.py\nc.py\n";
+  // The PR itself edited b.py, so its reversal noise is entangled with real
+  // work and the file must survive; a.py/c.py are pure base drift.
+  const prTouched = "b.py\nz.py\n";
+  assert.deepEqual([...baseDriftFiles(baseOnly, prTouched)].sort(), ["a.py", "c.py"]);
+});
+
+test("baseDriftFiles is empty when the PR touched everything the base did", () => {
+  assert.equal(baseDriftFiles("a.py\nb.py", "b.py\na.py\nc.py").size, 0);
+});
+
+test("dropDiffFiles removes only the named sections", () => {
+  const diff = [
+    "diff --git a/keep.py b/keep.py",
+    "@@ -1 +1 @@",
+    "+kept",
+    "diff --git a/drop.py b/drop.py",
+    "@@ -1 +1 @@",
+    "+dropped",
+    "diff --git a/also-keep.py b/also-keep.py",
+    "@@ -1 +1 @@",
+    "+kept too",
+    "",
+  ].join("\n");
+  const out = dropDiffFiles(diff, new Set(["drop.py"]));
+  assert.deepEqual(diffPaths(out), ["keep.py", "also-keep.py"]);
+  assert.ok(!out.includes("dropped"));
+  assert.ok(out.includes("kept too"));
+});
+
+test("dropDiffFiles returns the diff untouched when nothing is dropped", () => {
+  const diff = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x\n";
+  assert.equal(dropDiffFiles(diff, new Set()), diff);
+});
+
+test("baseLabel names the base the diff was taken against", () => {
+  assert.equal(baseLabel({ base_mode: "base-tip", base_sha: "52cfc030f8db2fd0c" }), "the tip of the PR's base branch (`52cfc030`)");
+  assert.equal(baseLabel({ base_mode: "merge-base", base_sha: "43717a84bd5152c4" }), "the merge-base with the PR's base branch (`43717a84`)");
+  assert.equal(baseLabel({ base_mode: null, base_sha: null }), undefined);
+});

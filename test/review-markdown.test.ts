@@ -85,3 +85,28 @@ test("buildReviewMarkdown degrades gracefully with a sparse record", () => {
   assert.match(md, /# Code review: PR #9/);
   assert.doesNotMatch(md, /## Goal|## Findings|## Bottom line/);
 });
+
+test("the Size line reports the diff that was reviewed, not GitHub's counters", () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7218", owner: "o", repo: "r", number: 7218 });
+  // GitHub's counters describe a different change: they froze while the PR was
+  // conflicted, and prepare pinned against the base branch tip instead.
+  const updated = updatePr(db, pr.id, {
+    title: "stacked", stage: "ready", status: "done",
+    additions: 1656, deletions: 16, changed_files: 11,
+    head_sha: "dc15610ec6de1139", base_sha: "52cfc030f8db2fd0", base_mode: "base-tip",
+    reviewed_size: JSON.stringify({ additions: 764, deletions: 23, changedFiles: 8 }),
+  });
+  const md = buildReviewMarkdown(updated, listFindings(db, pr.id));
+  assert.ok(md.includes("- Size: +764/-23 across 8 file(s)"), md.slice(0, 400));
+  assert.ok(!md.includes("1656"));
+  assert.ok(md.includes("base branch tip `52cfc030f8db`"));
+});
+
+test("the Size line falls back to GitHub's counters for rows with no reviewed size", () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  const updated = updatePr(db, pr.id, { stage: "ready", status: "done", additions: 40, deletions: 8, changed_files: 3 });
+  const md = buildReviewMarkdown(updated, listFindings(db, pr.id));
+  assert.ok(md.includes("- Size: +40/-8 across 3 file(s)"));
+});

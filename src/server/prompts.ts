@@ -51,7 +51,7 @@ const FINDINGS_CONTRACT = [
  * broken, and spends its response on that instead of on the review.
  */
 function sizeBlock(
-  reported: { additions: number; deletions: number; changedFiles: number },
+  reported: { additions: number; deletions: number; changedFiles: number; baseLabel?: string },
   diff: string,
 ): string[] {
   const actual = diffStats(diff);
@@ -64,18 +64,21 @@ function sizeBlock(
   // Nothing to reconcile when the counts agree, or when we have no counter to
   // compare against (an older PR row that never stored one).
   if (actual.changedFiles === reported.changedFiles || reported.changedFiles === 0) return [size];
+  // Name the base rather than guessing at a cause: the counters and the diff can
+  // disagree because GitHub froze them (conflicted PR) *or* because we chose a
+  // different, better base than GitHub's, and the reviewer can't tell which.
+  const against = reported.baseLabel ? ` against ${reported.baseLabel}` : "";
   return [
     size,
     `NOTE: GitHub's PR summary reports +${reported.additions}/-${reported.deletions} across ${reported.changedFiles} file(s), which does not`,
-    "describe the diff below. GitHub stops refreshing those counters while a PR is conflicted, and a",
-    "branch stacked on another that merges its base's ancestor outdates them too. The diff below is",
-    "the code under review and is authoritative: do not read the mismatch as a sign the diff is",
-    "corrupt or truncated, and do not spend your response reconciling the two numbers.",
+    `describe the diff below. The diff below was computed locally${against}, pinned for this review,`,
+    "and is the code under review. Do not read the mismatch as a sign the diff is corrupt or",
+    "truncated, and do not spend your response reconciling the two numbers.",
   ];
 }
 
 function metaBlock(
-  meta: { title: string; author: string; body?: string; additions: number; deletions: number; changedFiles: number },
+  meta: { title: string; author: string; body?: string; additions: number; deletions: number; changedFiles: number; baseLabel?: string },
   diff: string,
   intent?: string,
 ): string {
@@ -140,7 +143,7 @@ const CLASS_SPEC = [
 ];
 
 export function buildPlanPrompt(
-  meta: { title: string; additions: number; deletions: number; changedFiles: number },
+  meta: { title: string; additions: number; deletions: number; changedFiles: number; baseLabel?: string },
   diff: string,
   changedPaths: string[],
   intent?: string,
@@ -353,6 +356,7 @@ export function buildTriagePrompt(
     additions: number;
     deletions: number;
     changedFiles: number;
+    baseLabel?: string;
   },
   diff: string,
   discussion = "",
