@@ -8,7 +8,7 @@ import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
-import { parseAgentJson } from "./json.ts";
+import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
@@ -115,7 +115,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
     );
     writeArtifacts(dir, { "raw-findings.json": JSON.stringify(raw, null, 2), "finalizer-raw.txt": res.text });
 
-    const parsed = parseAgentJson(res.text, finalSchema);
+    const parsed = parseAgentJson(agentJsonSources(res), finalSchema);
     if (!parsed.ok) {
       // Degrade: keep the raw pooled findings so nothing is lost.
       replaceFindings(db, prId, raw.map((f) => ({ ...f, engine: "multi", agreement: false, selected: preselect(f.severity, false) })));

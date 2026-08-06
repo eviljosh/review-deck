@@ -27,6 +27,30 @@ export function diffPaths(diff: string): string[] {
   return out;
 }
 
+/**
+ * Size of a unified diff, measured from the diff itself.
+ *
+ * GitHub's PR counters (`additions`/`deletions`/`changedFiles`) can describe a
+ * different diff than the one under review: GitHub stops refreshing them while
+ * a PR is conflicted, and a stacked branch that merges its base's ancestor
+ * leaves them describing a long-gone state. Telling a reviewing agent "11 files"
+ * while handing it 445 wastes its output budget on litigating the mismatch, so
+ * every prompt sizes the diff it was actually given.
+ */
+export function diffStats(diff: string): { additions: number; deletions: number; changedFiles: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    // "+++"/"---" are file headers, not content lines. A content line whose
+    // own text begins "++" or "--" is skipped too (git parses hunk structure
+    // and would count it) — close enough for a prompt size hint, and the
+    // mismatch note keys on diffPaths(), which only matches real headers.
+    if (line.startsWith("+")) { if (!line.startsWith("+++")) additions++; }
+    else if (line.startsWith("-")) { if (!line.startsWith("---")) deletions++; }
+  }
+  return { additions, deletions, changedFiles: diffPaths(diff).length };
+}
+
 /** Per-file segments of a unified diff, keyed by new-side path. */
 export function diffSections(diff: string): Map<string, string> {
   const map = new Map<string, string>();

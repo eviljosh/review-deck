@@ -48,7 +48,7 @@ test("buildTriagePrompt asks for a headline and embeds PR body + Linear context"
 
 test("buildPlanPrompt asks for cohorts with attention classes over an explicit file list", () => {
   const { system, prompt } = buildPlanPrompt(
-    { title: "Add retries", additions: 40, deletions: 8 },
+    { title: "Add retries", additions: 40, deletions: 8, changedFiles: 2 },
     "diff --git a/x.ts b/x.ts\n+1",
     ["x.ts", "y.ts"],
     "Ship the retry path",
@@ -209,4 +209,55 @@ test("buildFinalizerPrompt embeds prior-review findings with reconcile instructi
   assert.match(system, /do NOT re-report/);
   assert.match(system, /what improved and what remains open/);
   assert.doesNotMatch(buildFinalizerPrompt([]).system, /PREVIOUS review/);
+});
+
+// Size line: measured from the diff in hand, not from GitHub's PR counters,
+// which go stale on conflicted and stacked PRs (review-deck #47: GitHub said
+// 11 files, the diff held 445, and two reviewers burned their output on it).
+test("size line is measured from the diff, not from GitHub's counters", () => {
+  const meta = { title: "T", author: "u", additions: 1656, deletions: 16, changedFiles: 11 };
+  const diff = "diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n+a\n+b\n-c";
+  for (const { prompt } of [
+    buildDimensionReviewPrompt({ key: "security", guidance: "g" }, meta, diff),
+    buildFullDiffReviewPrompt(meta, diff),
+  ]) {
+    assert.match(prompt, /Size: \+2\/-1 across 1 file\(s\)/);
+    assert.doesNotMatch(prompt, /Size: \+1656/);
+    // and the mismatch is called out rather than left for the agent to puzzle over
+    assert.match(prompt, /GitHub's PR summary reports \+1656\/-16 across 11 file\(s\)/);
+    assert.match(prompt, /authoritative/);
+  }
+});
+
+test("no mismatch note when GitHub's file count agrees with the diff", () => {
+  const meta = { title: "T", author: "u", additions: 2, deletions: 1, changedFiles: 1 };
+  const diff = "diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n+a\n+b\n-c";
+  const { prompt } = buildFullDiffReviewPrompt(meta, diff);
+  assert.match(prompt, /Size: \+2\/-1 across 1 file\(s\)/);
+  assert.doesNotMatch(prompt, /GitHub's PR summary reports/);
+});
+
+test("buildPlanPrompt sizes from the diff and flags a stale GitHub count", () => {
+  const diff = "diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n+a\ndiff --git a/y.ts b/y.ts\n+++ b/y.ts\n+b";
+  const { prompt } = buildPlanPrompt(
+    { title: "Add retries", additions: 40, deletions: 8, changedFiles: 1 },
+    diff,
+    ["x.ts", "y.ts"],
+  );
+  assert.match(prompt, /Size: \+2\/-0 across 2 file\(s\)/);
+  assert.match(prompt, /GitHub's PR summary reports \+40\/-8 across 1 file\(s\)/);
+});
+
+test("falls back to GitHub's counters when the diff has no measurable file headers", () => {
+  const meta = { title: "T", author: "u", additions: 10, deletions: 2, changedFiles: 3 };
+  const { prompt } = buildFullDiffReviewPrompt(meta, "not really a diff");
+  assert.match(prompt, /Size: \+10\/-2 across 3 file\(s\)/);
+  assert.doesNotMatch(prompt, /GitHub's PR summary reports/);
+});
+
+test("no mismatch note when the PR row stored no file count", () => {
+  const diff = "diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n+a";
+  const { prompt } = buildPlanPrompt({ title: "T", additions: 0, deletions: 0, changedFiles: 0 }, diff, ["x.ts"]);
+  assert.match(prompt, /Size: \+1\/-0 across 1 file\(s\)/);
+  assert.doesNotMatch(prompt, /GitHub's PR summary reports/);
 });

@@ -11,7 +11,7 @@ import { getPr, getRepoConfig, updatePr, startRun, finishRun } from "./db.ts";
 import { fetchPrMeta } from "./gh.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { buildDimensionReviewPrompt, buildFullDiffReviewPrompt } from "./prompts.ts";
-import { parseAgentJson } from "./json.ts";
+import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 
 const rawFindingsSchema = z.object({
@@ -99,8 +99,16 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
             { system: t.system, prompt: t.prompt, workdir, ...engineModelOptions(config, t.engineName), maxTurns: 30, timeoutMs: config.engineTimeoutMs, signal: deps.signal },
             taskLog,
           );
-          writeArtifacts(dir, { [`${t.engineName}-${t.dimension}.txt`]: res.text });
-          const parsed = parseAgentJson(res.text, rawFindingsSchema);
+          writeArtifacts(dir, {
+            [`${t.engineName}-${t.dimension}.txt`]: res.text,
+            // Tool inputs are a parse source now, so persist them for the same
+            // reason the final message is persisted: when a parse fails, this is
+            // the only full copy of an answer the agent put in a tool call.
+            ...(res.toolPayloads?.length
+              ? { [`${t.engineName}-${t.dimension}.tools.json`]: JSON.stringify(res.toolPayloads, null, 2) }
+              : {}),
+          });
+          const parsed = parseAgentJson(agentJsonSources(res), rawFindingsSchema);
           if (!parsed.ok) throw new Error(`parse failed (${t.engineName}/${t.dimension}): ${parsed.error}`);
           const found = parsed.value.findings.map((f): Finding => ({ ...f, engine: t.engineName, anchorable: false }));
           finishRun(db, rid, "done", undefined, saveStream());

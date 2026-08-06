@@ -35,6 +35,16 @@ export interface AgentRequest {
 
 export interface AgentResult {
   text: string;
+  /**
+   * Serialized `input` of every tool call the agent made, in call order.
+   *
+   * A reviewing agent sometimes routes its answer into a tool call instead of
+   * its final message — the harness exposes a `ReportFindings` tool, and a
+   * prompt that says "report findings as JSON" reads like an invitation to use
+   * it. When that happens `text` holds only the prose preamble and the findings
+   * are here instead, so JSON parsing has to consider both.
+   */
+  toolPayloads?: string[];
 }
 
 export interface LlmEngine {

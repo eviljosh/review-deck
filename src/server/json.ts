@@ -1,22 +1,41 @@
 import type { ZodType } from "zod";
+import type { AgentResult } from "./engines/types.ts";
+
+/**
+ * Every place an agent might have left its JSON answer, in order of preference:
+ * the final message first, then tool call inputs newest-first. An agent that
+ * reports findings through a tool call (the harness's `ReportFindings`) leaves
+ * `text` as prose only, so the tool payloads are the sole copy of the answer —
+ * and an agent that re-reports after a rejected call leaves the corrected copy
+ * last, so later calls beat earlier ones.
+ */
+export function agentJsonSources(res: AgentResult): string[] {
+  return [res.text, ...(res.toolPayloads ?? []).slice().reverse()];
+}
 
 export function parseAgentJson<T>(
-  raw: string,
+  raw: string | readonly string[],
   schema: ZodType<T>,
 ): { ok: true; value: T } | { ok: false; error: string } {
-  for (const candidates of [jsonObjectCandidates(raw), repairedCandidates(raw)]) {
-    for (const candidate of candidates) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(candidate);
-      } catch {
-        continue;
+  const sources = typeof raw === "string" ? [raw] : raw;
+  // Both passes sweep every source before the next pass runs, so a complete
+  // JSON object anywhere always wins over a repaired (truncated) one.
+  for (const pass of [jsonObjectCandidates, repairedCandidates]) {
+    for (const source of sources) {
+      for (const candidate of pass(source)) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(candidate);
+        } catch {
+          continue;
+        }
+        const result = schema.safeParse(parsed);
+        if (result.success) return { ok: true, value: result.data };
       }
-      const result = schema.safeParse(parsed);
-      if (result.success) return { ok: true, value: result.data };
     }
   }
-  return { ok: false, error: "no JSON object matching the schema found in agent output" };
+  const where = sources.length > 1 ? ` (searched the final message + ${sources.length - 1} tool payload(s))` : "";
+  return { ok: false, error: `no JSON object matching the schema found in agent output${where}` };
 }
 
 // Yield every balanced {...} substring, starting at each '{' in the text, so a

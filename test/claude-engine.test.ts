@@ -91,3 +91,36 @@ test("engine forwards thinking + effort when set, and omits them otherwise", asy
   assert.equal("thinking" in captured, false);
   assert.equal("effort" in captured, false);
 });
+
+test("returns full tool inputs as toolPayloads while the log preview stays clipped", async () => {
+  // The shape that silently dropped findings on PR #47: prose in the final
+  // message, the actual answer inside a ReportFindings call.
+  const findings = { findings: [{
+    dimension: "correctness", severity: "serious", file: "batch_writer.py", line: 230,
+    side: "RIGHT", what: "w".repeat(200), why: "y", suggestedFix: "f",
+  }] };
+  const q = fakeQuery([
+    { type: "assistant", message: { content: [
+      { type: "text", text: "I found one issue." },
+      { type: "tool_use", name: "ReportFindings", input: findings },
+    ] } },
+    { type: "result", subtype: "success", result: "I found one issue." },
+  ]);
+  const logs: string[] = [];
+  const res = await makeClaudeEngine(q).run(
+    { system: "s", prompt: "p", workdir: "/wt" },
+    (c) => logs.push(c),
+  );
+  assert.equal(res.text, "I found one issue.");
+  assert.deepEqual(res.toolPayloads, [JSON.stringify(findings)]);
+  // the log keeps its 140-char preview, so toolPayloads is the only full copy
+  const log = logs.join("");
+  assert.ok(log.includes("[tool] ReportFindings"));
+  assert.ok(!log.includes(JSON.stringify(findings)));
+});
+
+test("toolPayloads is empty when the agent calls no tools", async () => {
+  const q = fakeQuery([{ type: "result", subtype: "success", result: '{"ok":true}' }]);
+  const res = await makeClaudeEngine(q).run({ system: "s", prompt: "p", workdir: "/wt" }, () => {});
+  assert.deepEqual(res.toolPayloads, []);
+});

@@ -116,3 +116,27 @@ test("runDeepReview marks failed when fetching meta/diff throws", async () => {
   await assert.rejects(runDeepReview({ db, exec: failingExec, claude: engineFinding("c"), codex: engineFinding("c"), config, dataDir: freshDataDir(), onUpdate: () => {} }, pr.id));
   assert.equal(getPr(db, pr.id)!.status, "failed");
 });
+
+test("recovers findings an agent reported through a tool call instead of its final message", async () => {
+  const db = openDb(":memory:");
+  const pr = seedTriaged(db);
+  const payload = JSON.stringify({ findings: [{
+    dimension: "correctness", severity: "blocking", file: "batch_writer.py", line: 230,
+    side: "RIGHT", what: "error path commits partial writes", why: "y", suggestedFix: "f",
+  }] });
+  // The PR #47 shape: prose-only final message, findings inside a
+  // ReportFindings call. Before tool payloads were a parse source this threw
+  // "no JSON object matching the schema found in agent output".
+  const claude: LlmEngine = { name: "claude", run: async () => ({
+    text: "I reviewed this for correctness. I found one concern.",
+    toolPayloads: [payload],
+  }) };
+  const config = { ...DEFAULT_REVIEW_CONFIG, engines: { claude: true, codex: false }, dimensions: [{ key: "correctness", guidance: "g" }] };
+  const raw = await runDeepReview(
+    { db, exec: ghExec(), claude, codex: claude, config, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id,
+  );
+  assert.equal(raw.length, 1);
+  assert.equal(raw[0].what, "error path commits partial writes");
+  assert.equal(raw[0].engine, "claude");
+});
