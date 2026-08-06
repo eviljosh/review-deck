@@ -13,7 +13,7 @@ import { withTimeout } from "./with-timeout.ts";
 // Same read-only tool policy as the SDK engine — the two transports must stay
 // behaviorally interchangeable.
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh pr *)"];
-const DENY_TOOLS = ["Edit", "Write", "Bash(git push *)"];
+const DENY_TOOLS = ["Edit", "Write", "Bash(git push *)", "ReportFindings"];
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 /**

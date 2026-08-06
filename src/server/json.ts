@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import type { ZodType, ZodTypeDef } from "zod";
 import type { AgentResult } from "./engines/types.ts";
 
 /**
@@ -13,9 +13,12 @@ export function agentJsonSources(res: AgentResult): string[] {
   return [res.text, ...(res.toolPayloads ?? []).slice().reverse()];
 }
 
+// The input type is left open rather than defaulting to `T`: schemas that
+// preprocess agent output (see `lenientFinding`) parse `unknown` into `T`, and
+// `ZodType<T>` alone would fail to unify and collapse `T` to `unknown`.
 export function parseAgentJson<T>(
   raw: string | readonly string[],
-  schema: ZodType<T>,
+  schema: ZodType<T, ZodTypeDef, unknown>,
 ): { ok: true; value: T } | { ok: false; error: string } {
   const sources = typeof raw === "string" ? [raw] : raw;
   // Both passes sweep every source before the next pass runs, so a complete

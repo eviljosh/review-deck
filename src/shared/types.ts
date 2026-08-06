@@ -162,7 +162,8 @@ export interface PrRecord {
   review_decision: string | null;// APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
   checks: string | null;         // passing | failing | pending | none
   head_sha: string | null;       // PR head commit the review was pinned to (set at prepare)
-  base_sha: string | null;       // merge-base the pinned diff was computed against
+  base_sha: string | null;       // base commit the pinned diff was computed against (see base_mode)
+  base_mode: string | null;      // "merge-base" (normal) | "base-tip" (base branch was rebased under a stacked PR)
   latest_sha: string | null;     // most recently observed remote head (staleness signal)
   goal: string | null;           // triage: what problem / functionality this PR targets
   goal_verdict: string | null;   // triage: achieves | partially | does-not | unclear
@@ -275,3 +276,44 @@ export const findingSchema = z.object({
 });
 
 export const findingsArraySchema = z.array(findingSchema);
+
+/**
+ * Normalize one agent-authored finding before schema validation.
+ *
+ * A reviewing agent that reports through the harness's `ReportFindings` tool
+ * instead of the prompt's JSON contract emits *that* tool's schema, which has
+ * no `side`, `what`, `why`, or `suggestedFix` — it uses `summary`,
+ * `failure_scenario`, and `category`. Such a payload can never satisfy
+ * `findingSchema`, so before this the whole lane failed to parse and every
+ * finding in it was dropped (plenful#7218: one correctness + four tests
+ * findings lost while the run reported "done"). We also deny the tool and tell
+ * agents not to call it, but a reviewer that finds real bugs and describes them
+ * in the wrong field names should not be silently discarded.
+ *
+ * Only fills gaps — a field the agent did supply always wins.
+ */
+export function normalizeAgentFinding(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const f: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  if (typeof f.what !== "string" && typeof f.summary === "string") f.what = f.summary;
+  if (typeof f.why !== "string" && typeof f.failure_scenario === "string") f.why = f.failure_scenario;
+  if (typeof f.dimension !== "string" && typeof f.category === "string") f.dimension = f.category;
+  if (f.suggestedFix === undefined) f.suggestedFix = "";
+  // `ReportFindings` has no line/side. Absent line means "no anchor" (null);
+  // absent side means the new side, which is what a reviewer means unless they
+  // are pointing at a deleted line. A wrong guess costs an inline anchor (the
+  // comment degrades to file-level), not the finding.
+  if (f.line === undefined) f.line = null;
+  if (f.side === undefined) f.side = "RIGHT";
+  // Severity has no counterpart in that tool's schema. Land in the middle:
+  // high enough to survive triage, low enough not to auto-select for posting.
+  if (f.severity === undefined) f.severity = "moderate";
+  return f;
+}
+
+/** `schema` with agent field-name/omission drift normalized away first. */
+export function lenientFinding<T extends z.ZodTypeAny>(
+  schema: T,
+): z.ZodType<z.output<T>, z.ZodTypeDef, unknown> {
+  return z.preprocess(normalizeAgentFinding, schema);
+}

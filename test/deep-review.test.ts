@@ -140,3 +140,34 @@ test("recovers findings an agent reported through a tool call instead of its fin
   assert.equal(raw[0].what, "error path commits partial writes");
   assert.equal(raw[0].engine, "claude");
 });
+
+test("recovers findings reported in the harness ReportFindings schema (no side/what/suggestedFix)", async () => {
+  const db = openDb(":memory:");
+  const pr = seedTriaged(db);
+  // The plenful#7218 shape: the agent routed through the harness's own
+  // ReportFindings tool, whose schema has no side/what/suggestedFix and names
+  // the prose fields summary/failure_scenario. Before normalization this failed
+  // the parse and the lane's findings were dropped while the run said "done".
+  const payload = JSON.stringify({
+    findings: [{
+      file: "py/mfp_and_340b/mfp/commit_835.py", line: 40, category: "correctness", severity: "moderate",
+      summary: "failure-manifest S3 key is bucketless", failure_scenario: "put_object gets a relative key",
+    }],
+    level: "high",
+  });
+  const claude: LlmEngine = { name: "claude", run: async () => ({
+    text: "I've completed the correctness review. I found one issue worth reporting.",
+    toolPayloads: [payload],
+  }) };
+  const config = { ...DEFAULT_REVIEW_CONFIG, engines: { claude: true, codex: false }, dimensions: [{ key: "correctness", guidance: "g" }] };
+  const raw = await runDeepReview(
+    { db, exec: ghExec(), claude, codex: claude, config, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id,
+  );
+  assert.equal(raw.length, 1);
+  assert.equal(raw[0].what, "failure-manifest S3 key is bucketless");
+  assert.equal(raw[0].why, "put_object gets a relative key");
+  assert.equal(raw[0].dimension, "correctness");
+  assert.equal(raw[0].side, "RIGHT");
+  assert.equal(raw[0].suggestedFix, "");
+});

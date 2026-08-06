@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Exec } from "./exec.ts";
 import type { LlmEngine, LogSink } from "./engines/types.ts";
 import type { PrRecord, Finding } from "../shared/types.ts";
-import { findingSchema } from "../shared/types.ts";
+import { findingSchema, lenientFinding } from "../shared/types.ts";
 import { engineModelOptions, parseDimensions, type ReviewConfig } from "./review-config.ts";
 import { getPr, getRepoConfig, updatePr, startRun, finishRun } from "./db.ts";
 import { fetchPrMeta } from "./gh.ts";
@@ -15,7 +15,7 @@ import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 
 const rawFindingsSchema = z.object({
-  findings: z.array(findingSchema.omit({ engine: true, anchorable: true })),
+  findings: z.array(lenientFinding(findingSchema.omit({ engine: true, anchorable: true }))),
 });
 
 export interface DeepReviewDeps {

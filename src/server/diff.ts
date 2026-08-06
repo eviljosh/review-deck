@@ -51,6 +51,57 @@ export function diffStats(diff: string): { additions: number; deletions: number;
   return { additions, deletions, changedFiles: diffPaths(diff).length };
 }
 
+export type BaseMode = "merge-base" | "base-tip";
+
+export interface BaseCandidate {
+  sha: string;
+  diff: string;
+}
+
+/**
+ * Which base the pinned diff should be computed against.
+ *
+ * `merge-base` is the standard PR diff and the default: it excludes work the
+ * base branch picked up after this branch forked, which is exactly what you
+ * want when the base is a long-lived branch that keeps moving.
+ *
+ * It breaks down for a *stacked* PR whose base branch was rewritten — rebased
+ * or force-pushed — after this branch forked off it. The head still carries the
+ * base's pre-rebase commits, so the merge-base falls back to wherever the two
+ * histories last agreed, and `merge-base..head` sweeps in the whole base branch's
+ * work as if this PR had written it. plenful#7218 fed reviewers 445 files /
+ * 1.9MB that way; against the base branch's tip the same PR is 8 files.
+ *
+ * Both failure modes are visible in the file counts, which is what this keys on:
+ *   • base branch moved ahead normally → the base-tip diff is the *larger* of
+ *     the two (it adds the base's new work back in, inverted) → keep merge-base.
+ *   • base branch was rewritten → the base-tip diff is dramatically *smaller*
+ *     (it drops the base's work, which was never this PR's) → use base-tip.
+ * The margin (2x and at least 5 files) keeps small, ordinary differences from
+ * flipping the choice; a rewritten base shows up as an order of magnitude.
+ *
+ * Caveat worth knowing when the base-tip diff wins: two-dot against the tip
+ * renders base commits the head hasn't absorbed as reversals. That noise is
+ * bounded by how far the base has moved, and it beats reviewing 437 files of
+ * someone else's code.
+ */
+export function pickPinnedBase(
+  mergeBase: BaseCandidate,
+  baseTip: BaseCandidate | null,
+): { sha: string; diff: string; mode: BaseMode } {
+  const chosen = { sha: mergeBase.sha, diff: mergeBase.diff, mode: "merge-base" as BaseMode };
+  if (!baseTip || baseTip.sha === mergeBase.sha) return chosen;
+  const tipFiles = diffPaths(baseTip.diff).length;
+  const mergeBaseFiles = diffPaths(mergeBase.diff).length;
+  // An empty base-tip diff means the head is already contained in the base
+  // branch: there'd be nothing left to review, so keep the merge-base diff.
+  if (tipFiles === 0) return chosen;
+  if (mergeBaseFiles >= tipFiles * 2 && mergeBaseFiles - tipFiles >= 5) {
+    return { sha: baseTip.sha, diff: baseTip.diff, mode: "base-tip" };
+  }
+  return chosen;
+}
+
 /** Per-file segments of a unified diff, keyed by new-side path. */
 export function diffSections(diff: string): Map<string, string> {
   const map = new Map<string, string>();

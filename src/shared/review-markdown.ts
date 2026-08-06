@@ -61,7 +61,11 @@ export function buildReviewMarkdown(
   if (pr.additions != null || pr.deletions != null) {
     lines.push(`- Size: +${pr.additions ?? 0}/-${pr.deletions ?? 0} across ${pr.changed_files ?? "?"} file(s)`);
   }
-  if (pr.head_sha) lines.push(`- Reviewed at commit \`${pr.head_sha}\`${pr.base_sha ? ` (merge-base \`${pr.base_sha.slice(0, 12)}\`)` : ""}`);
+  if (pr.head_sha) {
+    // Rows written before base selection existed have no base_mode and were always merge-base.
+    const baseLabel = pr.base_mode === "base-tip" ? "base branch tip" : "merge-base";
+    lines.push(`- Reviewed at commit \`${pr.head_sha}\`${pr.base_sha ? ` (${baseLabel} \`${pr.base_sha.slice(0, 12)}\`)` : ""}`);
+  }
   if (pr.danger_level) lines.push(`- Danger: **${pr.danger_level}**${flags.length ? ` — flags: ${flags.join(", ")}` : ""}`);
   lines.push("");
   lines.push("This is the output of an automated multi-model review (review-deck). Treat the findings");

@@ -29,6 +29,8 @@ const FINDINGS_CONTRACT = [
   '  "dimension": string, "severity": "blocking"|"serious"|"moderate"|"optional",',
   '  "file": string, "line": number|null, "side": "LEFT"|"RIGHT",',
   '  "what": string, "why": string, "suggestedFix": string } ] }',
+  "Put that JSON in your FINAL MESSAGE. Do NOT call a ReportFindings tool — its schema is not",
+  "this one, and findings reported that way arrive incomplete.",
   "Ignore CI-caught nits (formatting/imports/type errors), pre-existing/untouched-line issues,",
   "and likely false positives. Return an empty findings array if you find nothing.",
   "Each field has a distinct job — keep them separate, tight, and scannable, not one dense wall:",
