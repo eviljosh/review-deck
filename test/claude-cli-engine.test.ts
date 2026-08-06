@@ -183,3 +183,29 @@ test("abort signal kills the child", async () => {
   await assert.rejects(resP);
   assert.ok(f.children[1].kills.length > 0);
 });
+
+test("collects full tool inputs as toolPayloads on the CLI transport too", async () => {
+  const findings = { findings: [{ dimension: "correctness", file: "x.py", what: "w".repeat(200) }] };
+  const f = fakeSpawn("2.1.217");
+  const engine = makeClaudeCliEngine({ spawnImpl: f.spawn });
+  const logs: string[] = [];
+  const resP = engine.run(req, (c) => logs.push(c));
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  f.children[1].finish([
+    { type: "assistant", message: { content: [
+      { type: "text", text: "I found one issue." },
+      { type: "tool_use", name: "Grep", input: { pattern: "retry" } },
+      { type: "tool_use", name: "ReportFindings", input: findings },
+    ] } },
+    RESULT,
+  ]);
+  const res = await resP;
+  // every tool input, in call order — the reporting one is the last
+  assert.deepEqual(res.toolPayloads, [
+    JSON.stringify({ pattern: "retry" }),
+    JSON.stringify(findings),
+  ]);
+  // log preview stays clipped
+  assert.ok(!logs.join("").includes(JSON.stringify(findings)));
+});

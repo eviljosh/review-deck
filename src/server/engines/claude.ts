@@ -34,6 +34,7 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
 
       const consume = async (): Promise<AgentResult> => {
         let finalText = "";
+        const toolPayloads: string[] = [];
         const iterable = queryImpl({
           prompt: req.prompt,
           options: {
@@ -57,10 +58,15 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
               if (block.type === "text" && block.text) onLog(block.text);
               // Surface tool activity so long "silent" stretches (the agent
               // grepping/reading the worktree) still show progress in the log.
+              // Keep the FULL input too (see AgentResult.toolPayloads) — the log
+              // preview is clipped for readability, but an agent that reported
+              // its findings through a tool call has its only copy of them here.
               else if (block.type === "tool_use" && block.name) {
                 let detail = "";
                 try {
-                  detail = JSON.stringify(block.input ?? {}).slice(0, 140);
+                  const serialized = JSON.stringify(block.input ?? {});
+                  toolPayloads.push(serialized);
+                  detail = serialized.slice(0, 140);
                 } catch { /* unserializable input — name alone is fine */ }
                 onLog(`\n[tool] ${block.name} ${detail}\n`);
               }
@@ -73,7 +79,7 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
             finalText = msg.result ?? "";
           }
         }
-        return { text: finalText };
+        return { text: finalText, toolPayloads };
       };
 
       return withTimeout(consume, timeoutMs, () => new AgentTimeoutError());

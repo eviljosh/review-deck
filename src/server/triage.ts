@@ -9,7 +9,7 @@ import { fetchPrMeta, fetchPrDiscussion } from "./gh.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { fetchLinearContext } from "./linear.ts";
 import { buildTriagePrompt } from "./prompts.ts";
-import { parseAgentJson } from "./json.ts";
+import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
 
@@ -77,7 +77,7 @@ export async function runTriage(deps: TriageDeps, prId: number): Promise<PrRecor
       "log.txt": log,
     });
 
-    const parsed = parseAgentJson(result.text, triageResultSchema);
+    const parsed = parseAgentJson(agentJsonSources(result), triageResultSchema);
     if (!parsed.ok) {
       const degraded = updatePr(db, prId, {
         status: "degraded",

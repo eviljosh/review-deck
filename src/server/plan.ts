@@ -6,7 +6,7 @@ import type { PlanFile, PrRecord, ReadingPlan } from "../shared/types.ts";
 import { getPr, getRepoConfig, updatePr } from "./db.ts";
 import { getPinnedDiff, diffPaths, diffSections } from "./diff.ts";
 import { buildPlanPrompt, buildPlanRetryPrompt } from "./prompts.ts";
-import { parseAgentJson } from "./json.ts";
+import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import type { EngineModelOptions } from "./review-config.ts";
 
@@ -77,7 +77,7 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
   const guidance = getRepoConfig(db, pr.owner, pr.repo)?.guidance?.trim() || undefined;
 
   const { system, prompt } = buildPlanPrompt(
-    { title: pr.title ?? "", additions: pr.additions ?? 0, deletions: pr.deletions ?? 0 },
+    { title: pr.title ?? "", additions: pr.additions ?? 0, deletions: pr.deletions ?? 0, changedFiles: pr.changed_files ?? 0 },
     diff, changed, intent, guidance,
   );
 
@@ -92,7 +92,7 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
   );
   writeArtifacts(dir, { "prompt.md": `# system\n\n${system}\n\n# prompt\n\n${prompt}`, "raw.txt": res.text });
 
-  const parsed = parseAgentJson(res.text, planSchema);
+  const parsed = parseAgentJson(agentJsonSources(res), planSchema);
   if (!parsed.ok) {
     writeArtifacts(dir, { "log.txt": log });
     throw new Error(`plan JSON parse failed: ${parsed.error}`);
@@ -119,7 +119,7 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
         sink,
       );
       writeArtifacts(dir, { "retry-raw.txt": r2.text });
-      const p2 = parseAgentJson(r2.text, retrySchema);
+      const p2 = parseAgentJson(agentJsonSources(r2), retrySchema);
       if (p2.ok) {
         const missingSet = new Set(missing);
         const extras = p2.value.files.filter((f) => missingSet.has(f.path)).map(normalizeFile);

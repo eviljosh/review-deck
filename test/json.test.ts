@@ -74,3 +74,33 @@ test("repairs output truncated inside a string value", () => {
 test("repair does not resurrect mismatched-bracket garbage", () => {
   assert.equal(parseAgentJson('{"a": [1}', z.object({ a: z.array(z.number()) })).ok, false);
 });
+
+// Tool-payload sources: an agent that answers through a tool call (the
+// harness's ReportFindings) leaves its final message as prose only.
+test("finds the object in a tool payload when the final message is prose only", () => {
+  const r = parseAgentJson(["I reviewed this and found one issue.", '{"a":7}'], schema);
+  assert.deepEqual(r, { ok: true, value: { a: 7 } });
+});
+
+test("prefers the final message over a tool payload when both match", () => {
+  const r = parseAgentJson(['{"a":1}', '{"a":2}'], schema);
+  assert.equal(r.ok && r.value.a, 1);
+});
+
+test("a complete tool payload beats a truncated object in the final message", () => {
+  // the final message would only parse via the trailing-closer repair path, so
+  // the already-complete payload has to win
+  const r = parseAgentJson(['Here it is: {"a":5', '{"a":9}'], schema);
+  assert.equal(r.ok && r.value.a, 9);
+});
+
+test("still repairs a truncated final message when no tool payload matches", () => {
+  const r = parseAgentJson(['Here it is: {"a":5', '{"unrelated":true}'], schema);
+  assert.equal(r.ok && r.value.a, 5);
+});
+
+test("failure names how many tool payloads were searched", () => {
+  const r = parseAgentJson(["prose", "{}", "{}"], schema);
+  assert.equal(r.ok, false);
+  assert.match(r.ok === false ? r.error : "", /final message \+ 2 tool payload\(s\)/);
+});

@@ -153,6 +153,7 @@ export function makeClaudeCliEngine(
 
       const work = () => new Promise<AgentResult>((resolve, reject) => {
         let finalText = "";
+        const toolPayloads: string[] = [];
         let sawSuccess = false;
         let stderrBuf = "";
         child.stderr?.on("data", (d: Buffer | string) => { stderrBuf += String(d); });
@@ -169,10 +170,14 @@ export function makeClaudeCliEngine(
           if (msg.type === "assistant" && msg.message) {
             for (const block of msg.message.content) {
               if (block.type === "text" && block.text) onLog(block.text);
+              // Full input retained as well (see AgentResult.toolPayloads) —
+              // findings reported via a tool call live only here.
               else if (block.type === "tool_use" && block.name) {
                 let detail = "";
                 try {
-                  detail = JSON.stringify(block.input ?? {}).slice(0, 140);
+                  const serialized = JSON.stringify(block.input ?? {});
+                  toolPayloads.push(serialized);
+                  detail = serialized.slice(0, 140);
                 } catch { /* unserializable input — name alone is fine */ }
                 onLog(`\n[tool] ${block.name} ${detail}\n`);
               }
@@ -191,7 +196,7 @@ export function makeClaudeCliEngine(
         child.on("error", (err: NodeJS.ErrnoException) =>
           reject(err.code === "ENOENT" ? notFoundError() : err));
         child.on("close", (code: number | null) => {
-          if (sawSuccess) return resolve({ text: finalText });
+          if (sawSuccess) return resolve({ text: finalText, toolPayloads });
           // If the result event already rejected, this is a no-op.
           const detail = stderrBuf.trim() ? `: ${stderrBuf.trim().slice(0, 400)}` : "";
           reject(new Error(`claude CLI exited (code ${code ?? "killed"}) without a result${detail}`));

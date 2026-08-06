@@ -1,5 +1,6 @@
 import type { Finding } from "../shared/types.ts";
 import type { DimensionDef, RiskFlagDef } from "./review-config.ts";
+import { diffStats } from "./diff.ts";
 
 // Prepended to every review prompt. The code under review (and its PR
 // title/body/comment threads) can itself contain LLM prompts and instruction-like
@@ -41,6 +42,36 @@ const FINDINGS_CONTRACT = [
   "You may Read/Grep/Glob the checked-out worktree for context. Do not modify anything.",
 ].join("\n");
 
+/**
+ * The "Size:" line, measured from the diff in hand rather than from GitHub's PR
+ * counters — plus, when the two disagree, one explicit line saying so. Without
+ * it a reviewer sees "11 file(s)" above a 445-file diff, concludes the diff is
+ * broken, and spends its response on that instead of on the review.
+ */
+function sizeBlock(
+  reported: { additions: number; deletions: number; changedFiles: number },
+  diff: string,
+): string[] {
+  const actual = diffStats(diff);
+  // A diff with no recognizable file headers tells us nothing — fall back to
+  // GitHub's numbers rather than asserting "0 file(s)" over real content.
+  if (actual.changedFiles === 0) {
+    return [`Size: +${reported.additions}/-${reported.deletions} across ${reported.changedFiles} file(s)`];
+  }
+  const size = `Size: +${actual.additions}/-${actual.deletions} across ${actual.changedFiles} file(s)`;
+  // Nothing to reconcile when the counts agree, or when we have no counter to
+  // compare against (an older PR row that never stored one).
+  if (actual.changedFiles === reported.changedFiles || reported.changedFiles === 0) return [size];
+  return [
+    size,
+    `NOTE: GitHub's PR summary reports +${reported.additions}/-${reported.deletions} across ${reported.changedFiles} file(s), which does not`,
+    "describe the diff below. GitHub stops refreshing those counters while a PR is conflicted, and a",
+    "branch stacked on another that merges its base's ancestor outdates them too. The diff below is",
+    "the code under review and is authoritative: do not read the mismatch as a sign the diff is",
+    "corrupt or truncated, and do not spend your response reconciling the two numbers.",
+  ];
+}
+
 function metaBlock(
   meta: { title: string; author: string; body?: string; additions: number; deletions: number; changedFiles: number },
   diff: string,
@@ -53,7 +84,7 @@ function metaBlock(
   const intentBlock = intent?.trim() ? ["", "Distilled intent (from triage):", intent.trim()] : [];
   return [
     `PR title: ${meta.title}`, `Author: ${meta.author}`,
-    `Size: +${meta.additions}/-${meta.deletions} across ${meta.changedFiles} file(s)`,
+    ...sizeBlock(meta, diff),
     ...desc,
     ...intentBlock,
     "", "Unified diff:", "```diff", diff, "```",
@@ -107,7 +138,7 @@ const CLASS_SPEC = [
 ];
 
 export function buildPlanPrompt(
-  meta: { title: string; additions: number; deletions: number },
+  meta: { title: string; additions: number; deletions: number; changedFiles: number },
   diff: string,
   changedPaths: string[],
   intent?: string,
@@ -158,7 +189,7 @@ export function buildPlanPrompt(
   const intentBlock = intent?.trim() ? ["", "Distilled intent (from triage):", intent.trim()] : [];
   const prompt = [
     `PR title: ${meta.title}`,
-    `Size: +${meta.additions}/-${meta.deletions}`,
+    ...sizeBlock(meta, diff),
     ...intentBlock,
     "",
     `Changed files (${changedPaths.length} — classify every one):`,
