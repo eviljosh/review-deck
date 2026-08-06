@@ -55,7 +55,11 @@ export type BaseMode = "merge-base" | "base-tip";
 
 export interface BaseCandidate {
   sha: string;
-  diff: string;
+  /** How many files the candidate's diff touches. Counts only: the losing
+   * candidate is often the huge one (a merely-advanced base makes the tip diff
+   * the *larger* of the two), so callers measure with `--name-only` and fetch
+   * full text for the winner alone. */
+  files: number;
 }
 
 /**
@@ -88,16 +92,14 @@ export interface BaseCandidate {
 export function pickPinnedBase(
   mergeBase: BaseCandidate,
   baseTip: BaseCandidate | null,
-): { sha: string; diff: string; mode: BaseMode } {
-  const chosen = { sha: mergeBase.sha, diff: mergeBase.diff, mode: "merge-base" as BaseMode };
+): { sha: string; mode: BaseMode } {
+  const chosen = { sha: mergeBase.sha, mode: "merge-base" as BaseMode };
   if (!baseTip || baseTip.sha === mergeBase.sha) return chosen;
-  const tipFiles = diffPaths(baseTip.diff).length;
-  const mergeBaseFiles = diffPaths(mergeBase.diff).length;
   // An empty base-tip diff means the head is already contained in the base
   // branch: there'd be nothing left to review, so keep the merge-base diff.
-  if (tipFiles === 0) return chosen;
-  if (mergeBaseFiles >= tipFiles * 2 && mergeBaseFiles - tipFiles >= 5) {
-    return { sha: baseTip.sha, diff: baseTip.diff, mode: "base-tip" };
+  if (baseTip.files === 0) return chosen;
+  if (mergeBase.files >= baseTip.files * 2 && mergeBase.files - baseTip.files >= 5) {
+    return { sha: baseTip.sha, mode: "base-tip" };
   }
   return chosen;
 }

@@ -62,25 +62,33 @@ export async function runPrepare(deps: PrepareDeps, prId: number): Promise<PrRec
       const head = worktree.headSha;
       const diffFrom = async (base: string): Promise<string> =>
         (await exec("git", ["-C", cache, "diff", `${base}..${head}`])).stdout;
+      // File count only: the tip candidate usually loses (a base branch that
+      // merely advanced makes the tip diff the *larger* of the two), and its
+      // full text can run to tens of MB on a busy base — never materialize a
+      // diff we would throw away unread.
+      const filesTouchedFrom = async (base: string): Promise<number> =>
+        (await exec("git", ["-C", cache, "diff", "--name-only", `${base}..${head}`])).stdout
+          .split("\n").filter(Boolean).length;
       try {
-        const mergeBase: BaseCandidate = { sha: worktree.baseSha, diff: await diffFrom(worktree.baseSha) };
+        const mergeBaseDiff = await diffFrom(worktree.baseSha);
+        const mergeBase: BaseCandidate = { sha: worktree.baseSha, files: diffPaths(mergeBaseDiff).length };
         // Measure the base branch's tip as well, so pickPinnedBase() can catch a
         // stacked PR whose base was rebased out from under it.
         let baseTip: BaseCandidate | null = null;
         if (worktree.baseTipSha && worktree.baseTipSha !== worktree.baseSha) {
           try {
-            baseTip = { sha: worktree.baseTipSha, diff: await diffFrom(worktree.baseTipSha) };
+            baseTip = { sha: worktree.baseTipSha, files: await filesTouchedFrom(worktree.baseTipSha) };
           } catch {
             // tip unreachable (shallow/pruned ref) — merge-base is all we have
           }
         }
         const picked = pickPinnedBase(mergeBase, baseTip);
-        diff = picked.diff;
+        diff = picked.mode === "base-tip" ? await diffFrom(picked.sha) : mergeBaseDiff;
         baseSha = picked.sha;
         baseMode = picked.mode;
         if (baseTip) {
-          log(`[prepare] base candidates: merge-base ${mergeBase.sha.slice(0, 8)} → ${diffPaths(mergeBase.diff).length} file(s); `
-            + `base tip ${baseTip.sha.slice(0, 8)} → ${diffPaths(baseTip.diff).length} file(s)\n`);
+          log(`[prepare] base candidates: merge-base ${mergeBase.sha.slice(0, 8)} → ${mergeBase.files} file(s); `
+            + `base tip ${baseTip.sha.slice(0, 8)} → ${baseTip.files} file(s)\n`);
         }
         if (picked.mode === "base-tip") {
           log("[prepare] using the base branch tip: its merge-base diff carries the base branch's own work, "

@@ -51,14 +51,6 @@ test("diffStats of an empty diff is all zeros", () => {
   assert.deepEqual(diffStats(""), { additions: 0, deletions: 0, changedFiles: 0 });
 });
 
-// Build a diff touching `n` distinct files, so pickPinnedBase's file counts are
-// what's under test rather than diff-parsing minutiae.
-function diffOf(n: number, prefix = "f"): string {
-  return Array.from({ length: n }, (_, i) =>
-    [`diff --git a/${prefix}${i}.ts b/${prefix}${i}.ts`, `--- a/${prefix}${i}.ts`, `+++ b/${prefix}${i}.ts`, "@@ -1 +1 @@", "-old", "+new"].join("\n"),
-  ).join("\n");
-}
-
 const basePickCases: [string, string, string | null, number, number, "merge-base" | "base-tip"][] = [
   // name,                                   mergeBase sha, baseTip sha, mbFiles, tipFiles, expected
   ["no base-tip candidate → merge-base",     "aaa",         null,        8,       0,        "merge-base"],
@@ -78,13 +70,11 @@ const basePickCases: [string, string, string | null, number, number, "merge-base
 
 for (const [name, mbSha, tipSha, mbFiles, tipFiles, expected] of basePickCases) {
   test(`pickPinnedBase: ${name}`, () => {
-    const mergeBase = { sha: mbSha, diff: diffOf(mbFiles, "m") };
-    const baseTip = tipSha === null ? null : { sha: tipSha, diff: diffOf(tipFiles, "t") };
+    const mergeBase = { sha: mbSha, files: mbFiles };
+    const baseTip = tipSha === null ? null : { sha: tipSha, files: tipFiles };
     const picked = pickPinnedBase(mergeBase, baseTip);
     assert.equal(picked.mode, expected);
-    const want = expected === "merge-base" ? mergeBase : baseTip!;
-    assert.equal(picked.sha, want.sha);
-    assert.equal(picked.diff, want.diff);
+    assert.equal(picked.sha, (expected === "merge-base" ? mergeBase : baseTip!).sha);
   });
 }
 

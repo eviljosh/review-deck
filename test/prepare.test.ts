@@ -80,8 +80,14 @@ function stackedExec(seen: string[][]): Exec {
     seen.push([cmd, ...args]);
     // Files touched by base commits the head lacks.
     if (cmd === "git" && args.includes("log")) return { stdout: `${DRIFT}\n`, stderr: "" };
-    // Files the PR itself touched (merge-base..head) — deliberately excludes DRIFT.
-    if (cmd === "git" && args.includes("--name-only")) return { stdout: "py/mfp_and_340b/mfp/commit_835.py\n", stderr: "" };
+    if (cmd === "git" && args.includes("--name-only")) {
+      // Candidate measurement: `--name-only <tip>..<head>` — 8 names, DRIFT among them.
+      if (args[args.length - 1].startsWith(BASE_TIP)) {
+        return { stdout: [DRIFT, ...Array.from({ length: 7 }, (_, i) => `mfp${i}.py`)].join("\n") + "\n", stderr: "" };
+      }
+      // Files the PR itself touched (merge-base..head) — deliberately excludes DRIFT.
+      return { stdout: "py/mfp_and_340b/mfp/commit_835.py\n", stderr: "" };
+    }
     if (cmd === "gh" && args.some((a) => a.includes("baseRefName"))) {
       return { stdout: JSON.stringify({
         title: "stacked", author: { login: "isabel" }, additions: 1656, deletions: 16,
@@ -108,9 +114,13 @@ test("runPrepare pins against the base branch tip when the base was rebased unde
   const result = await runPrepare({ db, exec: stackedExec(seen), dataDir, onUpdate: () => {} }, pr.id);
   assert.equal(result.base_mode, "base-tip");
   assert.equal(result.base_sha, "52cfc030f8db2fd0c5249ab0eeee1626ef482187");
-  // Both candidates were measured before choosing.
-  const diffRanges = seen.filter((c) => c[0] === "git" && c.includes("diff") && c[c.length - 1].includes("..")).map((c) => c[c.length - 1]);
-  assert.equal(diffRanges.length, 2);
+  // Both candidates were measured before choosing — the tip by file count only
+  // — and the tip's full diff was fetched exactly once, after it won.
+  const diffCalls = seen.filter((c) => c[0] === "git" && c.includes("diff") && c[c.length - 1].includes(".."));
+  assert.deepEqual(
+    diffCalls.map((c) => [c[c.length - 1].split("..")[0].slice(0, 8), c.includes("--name-only")]),
+    [["43717a84", false], ["52cfc030", true], ["52cfc030", false]],
+  );
   // The base-drift file the PR never touched was stripped: 8 candidates -> 7 reviewed.
   assert.deepEqual(JSON.parse(result.reviewed_size!).changedFiles, 7);
   const pinned = readFileSync(`${dataDir}/artifacts/${pr.id}/prepare/diff.patch`, "utf8");
@@ -121,7 +131,8 @@ test("runPrepare pins against the base branch tip when the base was rebased unde
 test("runPrepare keeps the merge-base when the base branch merely advanced", async () => {
   const db = openDb(":memory:");
   const pr = insertPr(db, { url: "https://github.com/o/r/pull/9", owner: "o", repo: "r", number: 9 });
-  const base = stackedExec([]);
+  const seen: string[][] = [];
+  const base = stackedExec(seen);
   // Same wiring, but now the tip diff is the larger of the two — an ordinary PR
   // against a branch that kept moving.
   const exec: Exec = async (cmd, args) => {
@@ -129,6 +140,9 @@ test("runPrepare keeps the merge-base when the base branch merely advanced", asy
     if (cmd === "git" && args.includes("diff")) {
       const range = args[args.length - 1];
       const n = range.startsWith("52cfc030") ? 380 : 11;
+      if (args.includes("--name-only")) {
+        return { stdout: Array.from({ length: n }, (_, i) => `x${i}.py`).join("\n") + "\n", stderr: "" };
+      }
       return { stdout: Array.from({ length: n }, (_, i) => `diff --git a/x${i}.py b/x${i}.py\n@@ -1 +1 @@\n+n`).join("\n"), stderr: "" };
     }
     return r;
@@ -139,4 +153,9 @@ test("runPrepare keeps the merge-base when the base branch merely advanced", asy
   );
   assert.equal(result.base_mode, "merge-base");
   assert.equal(result.base_sha, "43717a84bd5152c4659f7e7150bfcd7b6db04037");
+  // The losing tip candidate was measured by name only — its (large) full diff
+  // was never materialized.
+  const fullTipDiffs = seen.filter((c) =>
+    c[0] === "git" && c.includes("diff") && !c.includes("--name-only") && c[c.length - 1].startsWith("52cfc030"));
+  assert.equal(fullTipDiffs.length, 0);
 });
