@@ -41,8 +41,10 @@ export function diffStats(diff: string): { additions: number; deletions: number;
   let additions = 0;
   let deletions = 0;
   for (const line of diff.split("\n")) {
-    // "+++"/"---" are file headers, not content lines — same rule `git
-    // diff --shortstat` applies, so these totals match what git reports.
+    // "+++"/"---" are file headers, not content lines. A content line whose
+    // own text begins "++" or "--" is skipped too (git parses hunk structure
+    // and would count it) — close enough for a prompt size hint, and the
+    // mismatch note keys on diffPaths(), which only matches real headers.
     if (line.startsWith("+")) { if (!line.startsWith("+++")) additions++; }
     else if (line.startsWith("-")) { if (!line.startsWith("---")) deletions++; }
   }

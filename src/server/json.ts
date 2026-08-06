@@ -3,12 +3,14 @@ import type { AgentResult } from "./engines/types.ts";
 
 /**
  * Every place an agent might have left its JSON answer, in order of preference:
- * the final message first, then each tool call's input. An agent that reports
- * findings through a tool call (the harness's `ReportFindings`) leaves `text`
- * as prose only, so the tool payloads are the sole copy of the answer.
+ * the final message first, then tool call inputs newest-first. An agent that
+ * reports findings through a tool call (the harness's `ReportFindings`) leaves
+ * `text` as prose only, so the tool payloads are the sole copy of the answer —
+ * and an agent that re-reports after a rejected call leaves the corrected copy
+ * last, so later calls beat earlier ones.
  */
 export function agentJsonSources(res: AgentResult): string[] {
-  return [res.text, ...(res.toolPayloads ?? [])];
+  return [res.text, ...(res.toolPayloads ?? []).slice().reverse()];
 }
 
 export function parseAgentJson<T>(

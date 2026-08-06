@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { parseAgentJson } from "../src/server/json.ts";
+import { agentJsonSources, parseAgentJson } from "../src/server/json.ts";
 
 const schema = z.object({ a: z.number() });
 
@@ -97,6 +97,18 @@ test("a complete tool payload beats a truncated object in the final message", ()
 test("still repairs a truncated final message when no tool payload matches", () => {
   const r = parseAgentJson(['Here it is: {"a":5', '{"unrelated":true}'], schema);
   assert.equal(r.ok && r.value.a, 5);
+});
+
+test("a later tool payload beats an earlier one (re-report after a rejected call)", () => {
+  const sources = agentJsonSources({ text: "prose only", toolPayloads: ['{"a":1}', '{"a":2}'] });
+  const r = parseAgentJson(sources, schema);
+  assert.equal(r.ok && r.value.a, 2);
+});
+
+test("the final message still beats any tool payload", () => {
+  const sources = agentJsonSources({ text: '{"a":0}', toolPayloads: ['{"a":1}', '{"a":2}'] });
+  const r = parseAgentJson(sources, schema);
+  assert.equal(r.ok && r.value.a, 0);
 });
 
 test("failure names how many tool payloads were searched", () => {
