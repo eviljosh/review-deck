@@ -9,7 +9,7 @@ import { findingSchema, lenientFinding } from "../shared/types.ts";
 import { engineModelOptions, parseDimensions, type ReviewConfig } from "./review-config.ts";
 import { getPr, getRepoConfig, updatePr, startRun, finishRun } from "./db.ts";
 import { fetchPrMeta } from "./gh.ts";
-import { getPinnedDiff, baseLabel } from "./diff.ts";
+import { getPinnedDiff, baseLabel, liveLineageTip } from "./diff.ts";
 import { buildDimensionReviewPrompt, buildFullDiffReviewPrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
@@ -48,6 +48,10 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
     const meta = await fetchPrMeta(exec, pr.owner, pr.repo, pr.number);
     const diff = await getPinnedDiff(exec, dataDir, pr);
     const workdir = pr.worktree_path ?? dataDir;
+    // Second, read-only checkout at the tip of this PR's branch lineage, when
+    // the PR is a slice of a stack. Null (and a no-op everywhere below) unless
+    // prepare found one AND it is still on disk.
+    const tip = liveLineageTip(pr);
     const dir = stageArtifactDir(dataDir, prId, "deep_review");
 
     // Triage's distilled goal, so each reviewer can judge findings against what
@@ -68,12 +72,12 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
     const tasks: ReviewTask[] = [];
     if (config.engines.claude) {
       for (const dim of dimensions) {
-        const { system, prompt } = buildDimensionReviewPrompt(dim, promptMeta, diff, intent, guidance);
+        const { system, prompt } = buildDimensionReviewPrompt(dim, promptMeta, diff, intent, guidance, tip);
         tasks.push({ engine: claude, engineName: "claude", dimension: dim.key, system, prompt });
       }
     }
     if (config.engines.codex) {
-      const { system, prompt } = buildFullDiffReviewPrompt(promptMeta, diff, intent, guidance);
+      const { system, prompt } = buildFullDiffReviewPrompt(promptMeta, diff, intent, guidance, tip);
       tasks.push({ engine: codex, engineName: "codex", dimension: "full", system, prompt });
     }
 
@@ -100,7 +104,7 @@ export async function runDeepReview(deps: DeepReviewDeps, prId: number): Promise
         };
         try {
           const res = await t.engine.run(
-            { system: t.system, prompt: t.prompt, workdir, ...engineModelOptions(config, t.engineName), maxTurns: 30, timeoutMs: config.engineTimeoutMs, signal: deps.signal },
+            { system: t.system, prompt: t.prompt, workdir, ...(tip ? { additionalDirs: [tip.path] } : {}), ...engineModelOptions(config, t.engineName), maxTurns: 30, timeoutMs: config.engineTimeoutMs, signal: deps.signal },
             taskLog,
           );
           writeArtifacts(dir, {

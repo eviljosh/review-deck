@@ -171,3 +171,56 @@ test("recovers findings reported in the harness ReportFindings schema (no side/w
   assert.equal(raw[0].side, "RIGHT");
   assert.equal(raw[0].suggestedFix, "");
 });
+
+test("a live lineage tip reaches the reviewers as a read root and a prompt rule", async () => {
+  const db = openDb(":memory:");
+  const pr = seedTriaged(db);
+  // A path that actually exists on disk — liveLineageTip checks, because the
+  // shared tip can be reclaimed between prepare and a resumed deep review.
+  const tipPath = process.env.SCRATCH ?? "/tmp";
+  updatePr(db, pr.id, {
+    lineage_tip_ref: "origin/sawyer/340b-112-verity-automation",
+    lineage_tip_sha: "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+    lineage_tip_ahead: 25,
+    lineage_tip_path: tipPath,
+  });
+  const reqs: { system: string; additionalDirs?: string[] }[] = [];
+  const engine: LlmEngine = { name: "claude", run: async (req) => {
+    reqs.push({ system: req.system, additionalDirs: req.additionalDirs });
+    return { text: JSON.stringify({ findings: [] }) };
+  } };
+  const config = { ...DEFAULT_REVIEW_CONFIG, engines: { claude: true, codex: false }, dimensions: [{ key: "tests", guidance: "g" }] };
+  await runDeepReview(
+    { db, exec: ghExec(), claude: engine, codex: engine, config, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id,
+  );
+  assert.equal(reqs.length, 1);
+  assert.deepEqual(reqs[0].additionalDirs, [tipPath]);
+  assert.match(reqs[0].system, /LINEAGE TIP/);
+  assert.match(reqs[0].system, /origin\/sawyer\/340b-112-verity-automation/);
+});
+
+test("a lineage tip whose checkout is gone is treated as no tip at all", async () => {
+  const db = openDb(":memory:");
+  const pr = seedTriaged(db);
+  updatePr(db, pr.id, {
+    lineage_tip_ref: "origin/sawyer/340b-112-verity-automation",
+    lineage_tip_sha: "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+    lineage_tip_ahead: 25,
+    lineage_tip_path: `${process.env.SCRATCH ?? "/tmp"}/tips-reclaimed-by-archive-${Date.now()}`,
+  });
+  const reqs: { system: string; additionalDirs?: string[] }[] = [];
+  const engine: LlmEngine = { name: "claude", run: async (req) => {
+    reqs.push({ system: req.system, additionalDirs: req.additionalDirs });
+    return { text: JSON.stringify({ findings: [] }) };
+  } };
+  const config = { ...DEFAULT_REVIEW_CONFIG, engines: { claude: true, codex: false }, dimensions: [{ key: "tests", guidance: "g" }] };
+  await runDeepReview(
+    { db, exec: ghExec(), claude: engine, codex: engine, config, dataDir: freshDataDir(), onUpdate: () => {} },
+    pr.id,
+  );
+  // Pointing an agent at a path it cannot read is worse than staying silent:
+  // the rule would tell it to check there and the check would fail.
+  assert.equal(reqs[0].additionalDirs, undefined);
+  assert.doesNotMatch(reqs[0].system, /LINEAGE TIP/);
+});

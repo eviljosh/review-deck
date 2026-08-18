@@ -113,7 +113,7 @@ export async function runPipeline(deps: PipelineDeps, prId: number, signal?: Abo
   const needPrepare = resumeIdx <= 0 || !existing?.worktree_path || !existsSync(existing.worktree_path);
   if (needPrepare) {
     try {
-      await recordStage(db, prId, "prepare", aborted, () => runPrepare({ db, exec, dataDir, onUpdate, onLog }, prId), onLog);
+      await recordStage(db, prId, "prepare", aborted, () => runPrepare({ db, exec, dataDir, config, onUpdate, onLog }, prId), onLog);
     } catch (err) { onStageError("prepare", err); return; }
   } else {
     onLog(prId, resumeFrom!, `[pipeline] resuming from ${resumeFrom} — reusing earlier prepare\n`);

@@ -23,6 +23,57 @@ function repoGuidanceBlock(guidance?: string): string[] {
   return guidance?.trim() ? ["", "Repo-specific review guidance:", guidance.trim()] : [];
 }
 
+/** A read-only checkout at the tip of the PR's branch lineage (see repos.ts). */
+export interface LineageTip {
+  path: string;
+  ref: string;
+  sha: string;
+  ahead: number;
+}
+
+/**
+ * Grants the reviewer the lineage tip, and the one rule that makes it safe.
+ *
+ * A deep-review agent's cwd is a worktree pinned at the PR head with no general
+ * Bash, so on a stacked series the later PRs' code is not on disk at all. The
+ * agent greps for a caller or a test, finds none, and reports the absence: on a
+ * real 21-PR stack that was 15 of 168 findings. Returns [] when there is no
+ * tip, which keeps every prompt byte-identical to before this existed.
+ */
+/**
+ * `findings: false` drops the closing rule, which is written in the reviewers'
+ * vocabulary (report / severity). The plan stage reads the tip too, but emits a
+ * reading plan rather than findings, so it gets the orientation and its own
+ * ripple-shaped instruction at the call site instead.
+ */
+function lineageTipBlock(tip?: LineageTip | null, opts?: { findings?: boolean }): string[] {
+  if (!tip) return [];
+  const findings = opts?.findings ?? true;
+  return [
+    "",
+    "LINEAGE TIP — a second, READ-ONLY checkout, which you may read but are NOT reviewing:",
+    `  ${tip.path}`,
+    `It holds ${tip.ref} (${tip.sha.slice(0, 8)}), ${tip.ahead} commit(s) after this PR's head. This PR`,
+    "is an earlier slice of a longer series; the later slices exist there and not in your worktree.",
+    "",
+    "It is admissible for exactly ONE purpose: to refute a claim of ABSENCE. It is NOT the code",
+    "under review — never report a finding about code that exists only at the tip. And never",
+    "suppress a real defect in THIS diff because the tip fixes it later: this PR merges as written,",
+    "and a bug that ships for three PRs is a bug.",
+    ...(findings
+      ? [
+          "",
+          "THE RULE: before you report any finding whose claim is an absence — \"not tested\", \"no caller\",",
+          "\"dead code\", \"unused\", \"never invoked\", \"never executed against a real database\", \"missing\",",
+          "\"not wired up\", \"incomplete\" — Grep/Glob/Read the path above for the thing you believe is",
+          "missing. If it exists there, do not report it. If the path cannot be read, or your check is",
+          "not conclusive, DOWNGRADE the finding to severity \"optional\", phrase it as a question, and say",
+          "explicitly that you could not verify it.",
+        ]
+      : []),
+  ];
+}
+
 const FINDINGS_CONTRACT = [
   "Report findings as ONLY a JSON object of this exact shape (no prose, no code fence):",
   '{ "findings": [ {',
@@ -102,12 +153,14 @@ export function buildDimensionReviewPrompt(
   diff: string,
   intent?: string,
   repoGuidance?: string,
+  tip?: LineageTip | null,
 ): { system: string; prompt: string } {
   const system = [
     PROMPT_INJECTION_GUARD, "",
     `You are a senior code reviewer focused ONLY on: ${dimension.key} — ${dimension.guidance}.`,
     "Review the PR diff for issues in that dimension only.",
     ...repoGuidanceBlock(repoGuidance),
+    ...lineageTipBlock(tip),
     "", FINDINGS_CONTRACT,
   ].join("\n");
   return { system, prompt: metaBlock(meta, diff, intent) };
@@ -118,12 +171,14 @@ export function buildFullDiffReviewPrompt(
   diff: string,
   intent?: string,
   repoGuidance?: string,
+  tip?: LineageTip | null,
 ): { system: string; prompt: string } {
   const system = [
     PROMPT_INJECTION_GUARD, "",
     "You are a senior code reviewer. Review the whole PR diff for correctness, intent match,",
     "maintainability, test coverage, and security/data-loss issues.",
     ...repoGuidanceBlock(repoGuidance),
+    ...lineageTipBlock(tip),
     "", FINDINGS_CONTRACT,
   ].join("\n");
   return { system, prompt: metaBlock(meta, diff, intent) };
@@ -148,6 +203,7 @@ export function buildPlanPrompt(
   changedPaths: string[],
   intent?: string,
   repoGuidance?: string,
+  tip?: LineageTip | null,
 ): { system: string; prompt: string } {
   const system = [
     PROMPT_INJECTION_GUARD, "",
@@ -182,7 +238,12 @@ export function buildPlanPrompt(
     "      1–3 short markdown lines — or, having checked, omit the field. Omission means",
     "      \"checked, no ripple\", never \"didn't look\". Most files have no ripple, and a",
     "      noisy note is worse than none.",
+    ...(tip
+      ? ["      The LINEAGE TIP checkout described below is in scope for that grep: a caller that",
+         "      exists only there is still a caller, and its absence from your worktree is not evidence."]
+      : []),
     ...repoGuidanceBlock(repoGuidance),
+    ...lineageTipBlock(tip, { findings: false }),
     "",
     "Respond with ONLY a JSON object (no prose, no code fence) of this exact shape:",
     '{ "cohorts": [ { "label": string, "why": string, "files": [',
@@ -248,6 +309,8 @@ export function buildFinalizerPrompt(
     priorFindings?: PriorFinding[];
     /** The plan stage's per-file attention classes — context for impact scoring. */
     planFiles?: { path: string; class: string }[];
+    /** The lineage tip the reviewers were given, when there was one. */
+    tip?: LineageTip | null;
   },
 ): { system: string; prompt: string } {
   const goalBlock = context?.goal?.trim()
@@ -287,6 +350,21 @@ export function buildFinalizerPrompt(
         "The verdict MUST say what improved and what remains open since the previous review.",
       ]
     : [];
+  // Absence claims are the failure mode a stacked PR produces: the reviewers
+  // worked from a worktree at this PR's head, where a later PR's tests and
+  // callers simply do not exist. They were given the tip and told to check
+  // before claiming; this is the backstop for the ones that didn't.
+  const tipBlock = context?.tip
+    ? [
+        "",
+        `This PR is an earlier slice of a longer series — ${context.tip.ref} is ${context.tip.ahead} commit(s)`,
+        "further along, and the reviewers had read access to a checkout of it. Any finding whose",
+        "claim is an ABSENCE (\"not tested\", \"no caller\", \"dead code\", \"unused\", \"missing\", \"not",
+        "wired up\") is only as good as a check against that tip: unless the finding says it verified",
+        "the absence there, drop it as unverified or score it impact \"low\". Do NOT extend that",
+        "leniency to a defect in the diff itself — this PR merges as written.",
+      ]
+    : [];
   // The reading plan is built by its own stage; here it only informs impact scoring.
   const planBlock = context?.planFiles?.length
     ? [
@@ -312,6 +390,7 @@ export function buildFinalizerPrompt(
     ...goalBlock,
     ...rejectedBlock,
     ...priorBlock,
+    ...tipBlock,
     ...planBlock,
     "",
     "For each finalized finding, set \"sources\" to which engines flagged it",

@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import type { Exec } from "./exec.ts";
 import type { PrRecord } from "../shared/types.ts";
+import type { LineageTip } from "./prompts.ts";
 import { readArtifact } from "./artifacts.ts";
 import { fetchPrDiff } from "./gh.ts";
 
@@ -147,6 +149,27 @@ export function baseLabel(pr: Pick<PrRecord, "base_mode" | "base_sha">): string 
   return pr.base_mode === "base-tip"
     ? `the tip of the PR's base branch (\`${sha}\`)`
     : `the merge-base with the PR's base branch (\`${sha}\`)`;
+}
+
+/**
+ * The lineage-tip checkout to hand a reviewing agent, or null when there isn't
+ * a live one.
+ *
+ * The columns are written at prepare time, but the directory is shared across a
+ * stack and reclaimed on archive — by the time a resumed run reaches deep
+ * review it may be gone. Check the disk, not just the row: a tip path the agent
+ * cannot read is worse than no tip, since the rule tells it to check there.
+ */
+export function liveLineageTip(
+  pr: Pick<PrRecord, "lineage_tip_ref" | "lineage_tip_sha" | "lineage_tip_ahead" | "lineage_tip_path">,
+  fileExists: (p: string) => boolean = existsSync,
+): LineageTip | null {
+  const path = pr.lineage_tip_path;
+  const ref = pr.lineage_tip_ref;
+  const sha = pr.lineage_tip_sha;
+  const ahead = pr.lineage_tip_ahead;
+  if (!path || !ref || !sha || !ahead || ahead <= 0) return null;
+  return fileExists(path) ? { path, ref, sha, ahead } : null;
 }
 
 /** Per-file segments of a unified diff, keyed by new-side path. */

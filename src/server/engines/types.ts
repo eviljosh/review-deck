@@ -22,6 +22,13 @@ export interface AgentRequest {
   system: string;
   prompt: string;
   workdir: string;
+  /**
+   * Extra READ-ONLY context roots outside workdir (the lineage-tip checkout).
+   * A transport that cannot grant read-only access must ignore this rather than
+   * approximate it: `codex exec --add-dir` grants *writable* access, so the
+   * Codex engine deliberately drops it and relies on the prompt rule alone.
+   */
+  additionalDirs?: string[];
   model?: string;
   reasoningEffort?: ReasoningEffort;
   // Claude-only (SDK) extended-thinking controls; the Codex engine ignores these

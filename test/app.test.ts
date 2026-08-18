@@ -790,3 +790,44 @@ test("GET /api/prs/:id/runs 404s for a missing pr", async () => {
   const res = await app.inject({ method: "GET", url: "/api/prs/9999/runs" });
   assert.equal(res.statusCode, 404);
 });
+
+test("archive drops both checkouts and clears both path columns", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  d.exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "", stderr: "" }; };
+  const app = buildApp(d);
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  updatePr(d.db, pr.id, {
+    status: "done", worktree_path: "/data/worktrees/pr-1",
+    lineage_tip_path: "/data/worktrees/tips/o/r/9f1b2c3d4e5f",
+  });
+
+  const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/archive` });
+  assert.equal(res.statusCode, 200);
+  const joined = calls.map((c) => c.join(" "));
+  assert.ok(joined.some((c) => c.includes("worktree remove --force /data/worktrees/pr-1")));
+  assert.ok(joined.some((c) => c.includes("worktree remove --force /data/worktrees/tips/o/r/9f1b2c3d4e5f")));
+  const row = getPr(d.db, pr.id)!;
+  assert.equal(row.worktree_path, null);
+  assert.equal(row.lineage_tip_path, null);
+});
+
+test("archive keeps a lineage-tip checkout a sibling PR is still using", async () => {
+  const d = deps();
+  const calls: string[][] = [];
+  d.exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "", stderr: "" }; };
+  const app = buildApp(d);
+  const tip = "/data/worktrees/tips/o/r/9f1b2c3d4e5f";
+  const mine = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  const sibling = insertPr(d.db, { url: "https://github.com/o/r/pull/6", owner: "o", repo: "r", number: 6 });
+  updatePr(d.db, mine.id, { status: "done", worktree_path: "/data/worktrees/pr-1", lineage_tip_path: tip });
+  updatePr(d.db, sibling.id, { status: "done", worktree_path: "/data/worktrees/pr-2", lineage_tip_path: tip });
+
+  await app.inject({ method: "POST", url: `/api/prs/${mine.id}/archive` });
+  const joined = calls.map((c) => c.join(" "));
+  assert.ok(joined.some((c) => c.includes("worktree remove --force /data/worktrees/pr-1")));
+  // The tip is shared across the stack — deleting it here would pull the rug
+  // out from under the sibling's review.
+  assert.ok(!joined.some((c) => c.includes(tip)));
+  assert.equal(getPr(d.db, sibling.id)!.lineage_tip_path, tip);
+});
