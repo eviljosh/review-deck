@@ -10,8 +10,8 @@ import { withTimeout } from "./with-timeout.ts";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-// Real adapter wrapping @openai/codex-sdk. The SDK shells out to the local
-// `codex` CLI, which authenticates via the user's ChatGPT login (~/.codex/auth.json)
+// Real adapter wrapping @openai/codex-sdk. The SDK shells out to its bundled
+// `codex` CLI (not the one on PATH), which uses the user's login (~/.codex/auth.json)
 // and inherits its default model/reasoning-effort from ~/.codex/config.toml when
 // we don't override them. Offline tests inject a fake runner instead.
 const realCodexRun: CodexRunner = async (input) => {
