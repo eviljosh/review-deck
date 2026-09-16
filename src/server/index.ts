@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { openDb, reconcileInterrupted } from "./db.ts";
+import { purgeOrphanWorktrees } from "./cleanup.ts";
 import { realExec } from "./exec.ts";
 import { WsHub } from "./ws.ts";
 import { buildApp } from "./app.ts";
@@ -33,6 +34,8 @@ const dataDir = join(here, "..", "..", "data");
 const db = openDb(join(dataDir, "review-deck.db"));
 const reconciled = reconcileInterrupted(db);
 if (reconciled > 0) console.log(`reconciled ${reconciled} interrupted PR(s) → failed (retryable)`);
+const purged = purgeOrphanWorktrees(db, dataDir);
+if (purged > 0) console.log(`purged ${purged} orphaned worktree(s) from data/worktrees`);
 const hub = new WsHub();
 const app = buildApp({
   db, exec: realExec, dataDir, hub,
