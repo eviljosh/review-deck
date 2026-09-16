@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { openDb, insertPr, getPr } from "../src/server/db.ts";
+import { openDb, insertPr, getPr, updatePr } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import { runPrepare } from "../src/server/prepare.ts";
 
@@ -202,4 +202,49 @@ test("runPrepare leaves every lineage column null when there is no tip", async (
   assert.equal(result.lineage_tip_sha, null);
   assert.equal(result.lineage_tip_ahead, null);
   assert.equal(result.lineage_tip_path, null);
+});
+
+// A retry after the stack advanced: the previous run pinned an older tip, and
+// this run resolves a newer one at a different path.
+const OLD_TIP_PATH = "/data/worktrees/tips/o/r/0000aaaa1111";
+
+test("runPrepare releases a superseded lineage-tip checkout nobody else uses", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  updatePr(db, pr.id, { lineage_tip_path: OLD_TIP_PATH, lineage_tip_sha: "0000aaaa1111" });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  const result = await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.match(result.lineage_tip_path ?? "", /9f1b2c3d4e5f$/);
+  // The old checkout would otherwise be orphaned forever: archive and delete
+  // only ever look at the row's current path.
+  assert.ok(calls.some((c) => c.includes(`worktree remove --force ${OLD_TIP_PATH}`)));
+});
+
+test("runPrepare keeps a superseded tip a sibling PR still points at", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  const sibling = insertPr(db, { url: "https://github.com/o/r/pull/7456", owner: "o", repo: "r", number: 7456 });
+  updatePr(db, pr.id, { lineage_tip_path: OLD_TIP_PATH });
+  updatePr(db, sibling.id, { lineage_tip_path: OLD_TIP_PATH });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.ok(!calls.some((c) => c.includes(`worktree remove --force ${OLD_TIP_PATH}`)));
+  assert.equal(getPr(db, sibling.id)!.lineage_tip_path, OLD_TIP_PATH);
+});
+
+test("runPrepare does not touch a tip that resolved to the same path again", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  const same = "/data/worktrees/tips/o/r/9f1b2c3d4e5f";
+  updatePr(db, pr.id, { lineage_tip_path: same });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  const result = await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.equal(result.lineage_tip_path, same);
+  assert.ok(!calls.some((c) => c.includes(`worktree remove --force ${same}`)));
 });

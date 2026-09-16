@@ -86,7 +86,9 @@ async function resolveLineageTip(exec: Exec, cache: string, headSha: string): Pr
     }
 
     // for-each-ref over branch -r: it yields the commit and the ref name in one
-    // pass (so duplicates collapse for free) and skips the origin/HEAD symref.
+    // pass, so duplicates collapse for free. It does list the origin/HEAD symref
+    // (as "origin"), but that ref can only contain the head when the default
+    // branch does, and the ancestor guard above has already returned by then.
     const listed = (
       await exec("git", [
         "-C", cache, "for-each-ref", "--contains", headSha, "refs/remotes/origin",

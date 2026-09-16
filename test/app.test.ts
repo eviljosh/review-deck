@@ -799,6 +799,9 @@ test("archive drops both checkouts and clears both path columns", async () => {
   const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
   updatePr(d.db, pr.id, {
     status: "done", worktree_path: "/data/worktrees/pr-1",
+    lineage_tip_ref: "origin/sawyer/340b-112-verity-automation",
+    lineage_tip_sha: "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+    lineage_tip_ahead: 25,
     lineage_tip_path: "/data/worktrees/tips/o/r/9f1b2c3d4e5f",
   });
 
@@ -809,7 +812,12 @@ test("archive drops both checkouts and clears both path columns", async () => {
   assert.ok(joined.some((c) => c.includes("worktree remove --force /data/worktrees/tips/o/r/9f1b2c3d4e5f")));
   const row = getPr(d.db, pr.id)!;
   assert.equal(row.worktree_path, null);
+  // All four, not just the path: a row that names a ref/sha it no longer has
+  // a checkout for reads as "has a tip" everywhere the path isn't consulted.
   assert.equal(row.lineage_tip_path, null);
+  assert.equal(row.lineage_tip_ref, null);
+  assert.equal(row.lineage_tip_sha, null);
+  assert.equal(row.lineage_tip_ahead, null);
 });
 
 test("archive keeps a lineage-tip checkout a sibling PR is still using", async () => {

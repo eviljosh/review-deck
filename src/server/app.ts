@@ -254,7 +254,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // later retry re-creates it). Skip while running — engines may be using it.
     if ((pr.worktree_path || pr.lineage_tip_path) && pr.status !== "running") {
       await removeWorktrees(pr);
-      archived = updatePr(db, id, { worktree_path: null, lineage_tip_path: null });
+      archived = updatePr(db, id, {
+        worktree_path: null,
+        lineage_tip_ref: null, lineage_tip_sha: null, lineage_tip_ahead: null, lineage_tip_path: null,
+      });
     }
     hub.broadcast({ type: "pr_updated", pr: archived });
     return { ok: true };
