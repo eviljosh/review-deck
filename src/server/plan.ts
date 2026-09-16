@@ -4,7 +4,7 @@ import type { Exec } from "./exec.ts";
 import type { LlmEngine } from "./engines/types.ts";
 import type { PlanFile, PrRecord, ReadingPlan } from "../shared/types.ts";
 import { getPr, getRepoConfig, updatePr } from "./db.ts";
-import { getPinnedDiff, diffPaths, diffSections, baseLabel } from "./diff.ts";
+import { getPinnedDiff, diffPaths, diffSections, baseLabel, liveLineageTip } from "./diff.ts";
 import { buildPlanPrompt, buildPlanRetryPrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
@@ -76,9 +76,12 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
     : undefined;
   const guidance = getRepoConfig(db, pr.owner, pr.repo)?.guidance?.trim() || undefined;
 
+  // The ripple note asks the planner to grep for out-of-diff call sites; on a
+  // stacked PR the later slices' callers live only at the lineage tip.
+  const tip = liveLineageTip(pr);
   const { system, prompt } = buildPlanPrompt(
     { title: pr.title ?? "", additions: pr.additions ?? 0, deletions: pr.deletions ?? 0, changedFiles: pr.changed_files ?? 0, baseLabel: baseLabel(pr) },
-    diff, changed, intent, guidance,
+    diff, changed, intent, guidance, tip,
   );
 
   let log = "";
@@ -87,7 +90,7 @@ export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
     onLog?.(prId, "plan", chunk);
   };
   const res = await engine.run(
-    { system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions, maxTurns: 30, signal: deps.signal, timeoutMs: deps.timeoutMs },
+    { system, prompt, workdir: pr.worktree_path ?? dataDir, ...(tip ? { additionalDirs: [tip.path] } : {}), ...modelOptions, maxTurns: 30, signal: deps.signal, timeoutMs: deps.timeoutMs },
     sink,
   );
   writeArtifacts(dir, { "prompt.md": `# system\n\n${system}\n\n# prompt\n\n${prompt}`, "raw.txt": res.text });

@@ -122,6 +122,10 @@ export function makeClaudeCliEngine(
 
       const args = [
         "-p",
+        // Extra read roots (the lineage-tip checkout). --add-dir is variadic, so
+        // it has to sit where a following flag terminates the list — the
+        // --output-format below is what does that.
+        ...(req.additionalDirs?.length ? req.additionalDirs.flatMap((d) => ["--add-dir", d]) : []),
         // stream-json (line-delimited events, same shapes as the SDK stream)
         // for live logs; print mode requires --verbose to allow it.
         "--output-format", "stream-json", "--verbose",

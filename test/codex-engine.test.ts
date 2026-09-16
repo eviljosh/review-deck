@@ -42,3 +42,15 @@ test("codex engine times out when the runner hangs", async () => {
     AgentTimeoutError,
   );
 });
+
+test("codex engine never forwards additionalDirs to the runner", async () => {
+  let captured: Record<string, unknown> = {};
+  const runner: CodexRunner = async (input) => { captured = input; return { text: "ok" }; };
+  const engine = makeCodexEngine(runner);
+  await engine.run({ system: "s", prompt: "p", workdir: "/wt", additionalDirs: ["/data/worktrees/tips/o/r/abc"] }, () => {});
+  // Deliberate: `codex exec --add-dir` grants WRITABLE access, which would break
+  // the read-only-against-target-repos rule. Codex gets the prompt rule only.
+  assert.ok(!("additionalDirs" in captured));
+  assert.ok(!("additionalDirectories" in captured));
+  assert.ok(!JSON.stringify(captured).includes("/worktrees/tips/"));
+});

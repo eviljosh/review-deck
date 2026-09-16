@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import type { Exec } from "./exec.ts";
 import type { PrRecord } from "../shared/types.ts";
-import { getPr, updatePr } from "./db.ts";
+import type { ReviewConfig } from "./review-config.ts";
+import { getPr, updatePr, countPrsUsingTip } from "./db.ts";
 import { fetchPrMeta, fetchPrDiff, fetchPrStatus } from "./gh.ts";
 import { cachePath, prepareWorktree } from "./repos.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
@@ -11,6 +12,8 @@ export interface PrepareDeps {
   db: Database.Database;
   exec: Exec;
   dataDir: string;
+  /** Review settings; only `lineageTip` is read here. Absent → defaults apply. */
+  config?: ReviewConfig;
   onUpdate: (pr: PrRecord) => void;
   onLog?: (prId: number, stage: string, chunk: string) => void;
 }
@@ -47,9 +50,27 @@ export async function runPrepare(deps: PrepareDeps, prId: number): Promise<PrRec
       number: pr.number,
       prId,
       baseRef: meta.baseRef,
+      lineageTip: deps.config?.lineageTip ?? true,
       onLog: log,
     });
     log(`[prepare] worktree ready at ${worktree.path}\n`);
+    if (worktree.lineageTip) {
+      const t = worktree.lineageTip;
+      log(`[prepare] lineage tip: ${t.ref} (${t.sha.slice(0, 8)}) — ${t.ahead} commit(s) after this PR's head\n`);
+    }
+    // A retry after the stack advanced resolves a NEW tip (the path is keyed by
+    // commit), and archive/delete only ever look at the row's current path — so
+    // the superseded checkout would otherwise sit on disk forever. Release it
+    // here, unless a sibling PR still points at it.
+    const previousTip = pr.lineage_tip_path;
+    if (previousTip && previousTip !== (worktree.lineageTip?.path ?? null) && countPrsUsingTip(db, previousTip, prId) === 0) {
+      try {
+        await exec("git", ["-C", cachePath(dataDir, pr.owner, pr.repo), "worktree", "remove", "--force", previousTip]);
+        log(`[prepare] released superseded lineage tip at ${previousTip}\n`);
+      } catch {
+        // already gone — fine
+      }
+    }
 
     // Pin the diff to the exact commits just resolved so every later stage
     // (and the final post) reviews the same code even if the author pushes.
@@ -145,6 +166,12 @@ export async function runPrepare(deps: PrepareDeps, prId: number): Promise<PrRec
       head_sha: worktree.headSha,
       base_sha: baseSha,
       base_mode: baseMode,
+      // Null on every no-op path (no descendants, merged PR, failed lookup),
+      // which is exactly what liveLineageTip() reads as "no tip".
+      lineage_tip_ref: worktree.lineageTip?.ref ?? null,
+      lineage_tip_sha: worktree.lineageTip?.sha ?? null,
+      lineage_tip_ahead: worktree.lineageTip?.ahead ?? null,
+      lineage_tip_path: worktree.lineageTip?.path ?? null,
       // What was actually reviewed. GitHub's counters describe a different
       // change whenever they go stale or we pick a different base, and the
       // review brief should quote the diff the review was done on.

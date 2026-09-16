@@ -7,7 +7,7 @@ import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts"
 import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
 import { lenientFinding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
-import { getPinnedDiff } from "./diff.ts";
+import { getPinnedDiff, liveLineageTip } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
@@ -102,16 +102,21 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
   try {
     const diff = await getPinnedDiff(exec, dataDir, pr);
     const anchors = anchorableLines(diff);
+    // Same tip the reviewers had, so the finalizer can tell a verified absence
+    // claim from one nobody checked.
+    const tip = liveLineageTip(pr);
     const { system, prompt } = buildFinalizerPrompt(raw, {
       goal: pr.goal ?? undefined,
       goalVerdict: pr.goal_verdict ?? undefined,
       ...(deps.feedbackEnabled ? { rejectedExamples: listRejectedExamples(db, pr.owner, pr.repo) } : {}),
       priorFindings: parsePriorFindings(pr.prior_findings),
       planFiles: parsePlanFiles(pr.reading_plan),
+      tip,
     });
     const res = await finalizer.run(
       {
-        system, prompt, workdir: pr.worktree_path ?? dataDir, ...modelOptions,
+        system, prompt, workdir: pr.worktree_path ?? dataDir,
+        ...(tip ? { additionalDirs: [tip.path] } : {}), ...modelOptions,
         ...(deps.thinking ? { thinking: deps.thinking } : {}),
         ...(deps.effort ? { effort: deps.effort } : {}),
         maxTurns: 20, signal: deps.signal, timeoutMs: deps.timeoutMs,

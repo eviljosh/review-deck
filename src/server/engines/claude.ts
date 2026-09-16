@@ -49,6 +49,10 @@ export function makeClaudeEngine(queryImpl: QueryFn = realQuery): LlmEngine {
             disallowedTools: DENY_TOOLS,
             permissionMode: "dontAsk",
             abortController,
+            // Read roots outside cwd. permissionMode "dontAsk" denies anything
+            // not pre-approved, so without this the agent's reads of the
+            // lineage tip are silently refused — the grant is what makes it usable.
+            ...(req.additionalDirs?.length ? { additionalDirectories: req.additionalDirs } : {}),
             ...(req.model ? { model: req.model } : {}),
             // Extended thinking: `thinking` turns it on (adaptive), `effort` guides
             // its depth. Omitted unless the caller asked, so most runs keep SDK defaults.

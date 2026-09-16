@@ -100,13 +100,26 @@ Details of the CLI transport:
 
 ### Codex (ChatGPT login or `OPENAI_API_KEY`) — required unless Codex is disabled
 
-The Codex reviewer shells out to the local `codex` CLI, which authenticates via either:
+The Codex reviewer uses the CLI bundled with `@openai/codex-sdk` in this project's
+`node_modules`, independently of the Codex app or CLI installed on your `PATH`.
+It authenticates via either:
 
 - your **ChatGPT login** — run `codex login` once (stored in `~/.codex/auth.json`), **or**
 - an **`OPENAI_API_KEY`** in your environment / `.env`.
 
 Codex's model and reasoning effort are inherited from your `~/.codex/config.toml` unless
 overridden in the ⚙ Settings UI.
+
+If a review reports that a model "requires a newer version of Codex", upgrade the
+project's SDK and bundled CLI from the review-deck directory:
+
+```bash
+npm install @openai/codex-sdk@latest
+```
+
+Restart the review-deck server and retry the review. Updating only the global CLI or
+desktop app does not update this dependency. Check the project's CLI version with
+`./node_modules/.bin/codex --version`.
 
 ### Linear (`LINEAR_API_KEY`) — optional
 

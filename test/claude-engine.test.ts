@@ -124,3 +124,28 @@ test("toolPayloads is empty when the agent calls no tools", async () => {
   const res = await makeClaudeEngine(q).run({ system: "s", prompt: "p", workdir: "/wt" }, () => {});
   assert.deepEqual(res.toolPayloads, []);
 });
+
+test("engine grants additionalDirs as SDK read roots, and omits the option otherwise", async () => {
+  let captured: Record<string, unknown> = {};
+  const q: QueryFn = ({ options }) => {
+    captured = options;
+    return (async function* () {
+      yield { type: "result", subtype: "success", result: "ok" } as AgentMessage;
+    })();
+  };
+  const engine = makeClaudeEngine(q);
+
+  await engine.run(
+    { system: "s", prompt: "p", workdir: "/wt", additionalDirs: ["/data/worktrees/tips/o/r/abc123def456"] },
+    () => {},
+  );
+  assert.deepEqual(captured.additionalDirectories, ["/data/worktrees/tips/o/r/abc123def456"]);
+  // The grant must not loosen anything else: permissionMode "dontAsk" and the
+  // read-only tool set are what keep the extra root read-only.
+  assert.equal(captured.permissionMode, "dontAsk");
+  assert.deepEqual(captured.allowedTools, ["Read", "Grep", "Glob", "Bash(gh pr *)"]);
+
+  captured = {};
+  await engine.run({ system: "s", prompt: "p", workdir: "/wt" }, () => {});
+  assert.equal(captured.additionalDirectories, undefined);
+});

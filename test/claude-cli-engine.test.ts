@@ -209,3 +209,33 @@ test("collects full tool inputs as toolPayloads on the CLI transport too", async
   // log preview stays clipped
   assert.ok(!logs.join("").includes(JSON.stringify(findings)));
 });
+
+test("additionalDirs become --add-dir pairs terminated by the next flag", async () => {
+  const f = fakeSpawn("2.1.217");
+  const engine = makeClaudeCliEngine({ spawnImpl: f.spawn });
+  const resP = engine.run(
+    { ...req, additionalDirs: ["/data/worktrees/tips/o/r/abc123def456"] },
+    () => {},
+  );
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  f.children[1].finish([RESULT]);
+  await resP;
+
+  const a = f.calls[1].args;
+  assert.deepEqual(a.slice(0, 4), ["-p", "--add-dir", "/data/worktrees/tips/o/r/abc123def456", "--output-format"]);
+  // --add-dir is variadic: a following flag has to close the list, or the CLI
+  // swallows whatever comes next as another directory.
+  assert.ok(a.indexOf("--add-dir") < a.indexOf("--output-format"));
+});
+
+test("no --add-dir when the request has no additionalDirs", async () => {
+  const f = fakeSpawn("2.1.217");
+  const engine = makeClaudeCliEngine({ spawnImpl: f.spawn });
+  const resP = engine.run(req, () => {});
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  f.children[1].finish([RESULT]);
+  await resP;
+  assert.ok(!f.calls[1].args.includes("--add-dir"));
+});

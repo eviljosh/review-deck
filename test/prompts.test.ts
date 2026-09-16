@@ -272,3 +272,68 @@ test("no mismatch note when the PR row stored no file count", () => {
   assert.match(prompt, /Size: \+1\/-0 across 1 file\(s\)/);
   assert.doesNotMatch(prompt, /GitHub's PR summary reports/);
 });
+
+// ---------- lineage tip ----------
+
+const TIP = {
+  path: "/data/worktrees/tips/o/r/9f1b2c3d4e5f",
+  ref: "origin/sawyer/340b-112-verity-automation",
+  sha: "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+  ahead: 25,
+};
+const DIM = { key: "tests", guidance: "coverage" };
+const META = { title: "T", author: "u", additions: 1, deletions: 0, changedFiles: 1 };
+const DIFF = "diff --git a/x b/x\n+1";
+
+test("the tip block grants the path and states the absence rule to every reviewer", () => {
+  const reviewers = [
+    buildDimensionReviewPrompt(DIM, META, DIFF, undefined, undefined, TIP).system,
+    buildFullDiffReviewPrompt(META, DIFF, undefined, undefined, TIP).system,
+  ];
+  // The plan stage reads the tip too, so it needs the same orientation — but it
+  // emits a reading plan, not findings, so it deliberately does NOT get the rule
+  // below, which is phrased in report/severity terms it never uses.
+  const planner = buildPlanPrompt(META, DIFF, ["x"], undefined, undefined, TIP).system;
+
+  for (const system of [...reviewers, planner]) {
+    assert.match(system, /\/data\/worktrees\/tips\/o\/r\/9f1b2c3d4e5f/);
+    assert.match(system, /origin\/sawyer\/340b-112-verity-automation/);
+    assert.match(system, /25 commit\(s\) after this PR's head/);
+    // Anti-overcorrection: the tip refutes absence, it does not excuse the diff.
+    assert.match(system, /NOT the code\s+under review/);
+    assert.match(system, /this PR merges as written/);
+  }
+  for (const system of reviewers) {
+    assert.match(system, /THE RULE:/);
+    assert.match(system, /"not tested"/);
+    assert.match(system, /"dead code"/);
+    assert.match(system, /severity "optional"/);
+  }
+  assert.doesNotMatch(planner, /THE RULE:/);
+  assert.doesNotMatch(planner, /severity "optional"/);
+});
+
+test("the finalizer is told to distrust unverified absence claims when there is a tip", () => {
+  const { system } = buildFinalizerPrompt([], { tip: TIP });
+  assert.match(system, /origin\/sawyer\/340b-112-verity-automation is 25 commit\(s\)/);
+  assert.match(system, /ABSENCE/);
+  assert.match(system, /this PR merges as written/);
+});
+
+test("no tip: every prompt is byte-identical to one built without the argument", () => {
+  const pairs: [string, string][] = [
+    [buildDimensionReviewPrompt(DIM, META, DIFF).system, buildDimensionReviewPrompt(DIM, META, DIFF, undefined, undefined, null).system],
+    [buildFullDiffReviewPrompt(META, DIFF).system, buildFullDiffReviewPrompt(META, DIFF, undefined, undefined, null).system],
+    [buildPlanPrompt(META, DIFF, ["x"]).system, buildPlanPrompt(META, DIFF, ["x"], undefined, undefined, null).system],
+    [buildFinalizerPrompt([]).system, buildFinalizerPrompt([], { tip: null }).system],
+  ];
+  for (const [without, withNull] of pairs) {
+    assert.equal(withNull, without);
+    assert.doesNotMatch(without, /lineage tip/i);
+  }
+});
+
+test("the plan prompt's ripple grep counts the tip as in scope, but only when there is one", () => {
+  assert.match(buildPlanPrompt(META, DIFF, ["x"], undefined, undefined, TIP).system, /still a caller/);
+  assert.doesNotMatch(buildPlanPrompt(META, DIFF, ["x"]).system, /still a caller/);
+});

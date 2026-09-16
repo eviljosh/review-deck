@@ -8,7 +8,7 @@ import type { LlmEngine } from "./engines/types.ts";
 import { makeClaudeCliEngine } from "./engines/claude-cli.ts";
 import { loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-config.ts";
 import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
-import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, replaceFindings } from "./db.ts";
+import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, replaceFindings, countPrsUsingTip } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
 import { removeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
@@ -77,13 +77,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     );
   }
 
-  // Drop a PR's throwaway worktree from disk (best-effort).
-  async function removeWorktree(pr: PrRecord): Promise<void> {
-    if (!pr.worktree_path) return;
-    try {
-      await exec("git", ["-C", cachePath(dataDir, pr.owner, pr.repo), "worktree", "remove", "--force", pr.worktree_path]);
-    } catch {
-      // worktree already gone / repo not cloned — fine
+  // Drop a PR's throwaway worktrees from disk (best-effort).
+  async function removeWorktrees(pr: PrRecord): Promise<void> {
+    const remove = async (path: string): Promise<void> => {
+      try {
+        await exec("git", ["-C", cachePath(dataDir, pr.owner, pr.repo), "worktree", "remove", "--force", path]);
+      } catch {
+        // worktree already gone / repo not cloned — fine
+      }
+    };
+    if (pr.worktree_path) await remove(pr.worktree_path);
+    // The lineage-tip checkout is keyed by commit and shared by every PR in the
+    // stack, so it only goes when this is the last one holding it — otherwise a
+    // sibling mid-review loses the context it was told to check against.
+    if (pr.lineage_tip_path && countPrsUsingTip(db, pr.lineage_tip_path, pr.id) === 0) {
+      await remove(pr.lineage_tip_path);
     }
   }
 
@@ -92,7 +100,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // and tell clients to drop it.
   async function removePr(pr: PrRecord): Promise<void> {
     running.get(pr.id)?.abort();
-    await removeWorktree(pr);
+    await removeWorktrees(pr);
     removeArtifacts(dataDir, pr.id);
     deletePr(db, pr.id);
     hub.broadcast({ type: "pr_deleted", prId: pr.id });
@@ -244,9 +252,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     let archived = setArchived(db, id, true);
     // Reclaim disk: an archived review doesn't need its checkout anymore (a
     // later retry re-creates it). Skip while running — engines may be using it.
-    if (pr.worktree_path && pr.status !== "running") {
-      await removeWorktree(pr);
-      archived = updatePr(db, id, { worktree_path: null });
+    if ((pr.worktree_path || pr.lineage_tip_path) && pr.status !== "running") {
+      await removeWorktrees(pr);
+      archived = updatePr(db, id, {
+        worktree_path: null,
+        lineage_tip_ref: null, lineage_tip_sha: null, lineage_tip_ahead: null, lineage_tip_path: null,
+      });
     }
     hub.broadcast({ type: "pr_updated", pr: archived });
     return { ok: true };

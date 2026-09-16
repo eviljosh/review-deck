@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { openDb, insertPr, getPr } from "../src/server/db.ts";
+import { openDb, insertPr, getPr, updatePr } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import { runPrepare } from "../src/server/prepare.ts";
 
@@ -158,4 +158,93 @@ test("runPrepare keeps the merge-base when the base branch merely advanced", asy
   const fullTipDiffs = seen.filter((c) =>
     c[0] === "git" && c.includes("diff") && !c.includes("--name-only") && c[c.length - 1].startsWith("52cfc030"));
   assert.equal(fullTipDiffs.length, 0);
+});
+
+// A stacked PR with descendants: origin/…-verity-automation is 25 commits past
+// this PR's head, and a duplicate ref sits on the same commit.
+function lineageExec(): Exec {
+  const HEAD = "dc15610ec6de113950d4d6ba0a8a0c4066c1a12b";
+  const TIP = "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567";
+  return async (cmd, args) => {
+    if (cmd === "gh" && args[1] === "view") {
+      return { stdout: JSON.stringify({ title: "slice 1", author: { login: "sawyer" }, additions: 4, deletions: 1, changedFiles: 2 }), stderr: "" };
+    }
+    if (cmd === "gh") return { stdout: JSON.stringify({ state: "OPEN" }), stderr: "" };
+    if (args.includes("rev-parse") && args.includes("FETCH_HEAD")) return { stdout: `${HEAD}\n`, stderr: "" };
+    if (args.includes("symbolic-ref")) return { stdout: "origin/main\n", stderr: "" };
+    if (args.includes("--is-ancestor")) throw new Error("exited with code 1"); // not merged
+    if (args.includes("for-each-ref")) {
+      return { stdout: `${TIP} origin/sawyer/340b-112-verity-automation-core\n${TIP} origin/sawyer/340b-112-verity-automation\n`, stderr: "" };
+    }
+    if (args.includes("rev-list")) return { stdout: "25\n", stderr: "" };
+    return { stdout: "", stderr: "" };
+  };
+}
+
+test("runPrepare persists the lineage tip when the branch has descendants", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  const result = await runPrepare(
+    { db, exec: lineageExec(), dataDir: `${process.env.SCRATCH ?? "/tmp"}/prep-tip-${Date.now()}`, onUpdate: () => {} },
+    pr.id,
+  );
+  assert.equal(result.lineage_tip_ref, "origin/sawyer/340b-112-verity-automation");
+  assert.equal(result.lineage_tip_sha, "9f1b2c3d4e5f60718293a4b5c6d7e8f901234567");
+  assert.equal(result.lineage_tip_ahead, 25);
+  assert.match(result.lineage_tip_path ?? "", /\/worktrees\/tips\/o\/r\/9f1b2c3d4e5f$/);
+});
+
+test("runPrepare leaves every lineage column null when there is no tip", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/5", owner: "o", repo: "r", number: 5 });
+  const result = await runPrepare({ db, exec: ghExec(), dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.equal(result.lineage_tip_ref, null);
+  assert.equal(result.lineage_tip_sha, null);
+  assert.equal(result.lineage_tip_ahead, null);
+  assert.equal(result.lineage_tip_path, null);
+});
+
+// A retry after the stack advanced: the previous run pinned an older tip, and
+// this run resolves a newer one at a different path.
+const OLD_TIP_PATH = "/data/worktrees/tips/o/r/0000aaaa1111";
+
+test("runPrepare releases a superseded lineage-tip checkout nobody else uses", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  updatePr(db, pr.id, { lineage_tip_path: OLD_TIP_PATH, lineage_tip_sha: "0000aaaa1111" });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  const result = await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.match(result.lineage_tip_path ?? "", /9f1b2c3d4e5f$/);
+  // The old checkout would otherwise be orphaned forever: archive and delete
+  // only ever look at the row's current path.
+  assert.ok(calls.some((c) => c.includes(`worktree remove --force ${OLD_TIP_PATH}`)));
+});
+
+test("runPrepare keeps a superseded tip a sibling PR still points at", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  const sibling = insertPr(db, { url: "https://github.com/o/r/pull/7456", owner: "o", repo: "r", number: 7456 });
+  updatePr(db, pr.id, { lineage_tip_path: OLD_TIP_PATH });
+  updatePr(db, sibling.id, { lineage_tip_path: OLD_TIP_PATH });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.ok(!calls.some((c) => c.includes(`worktree remove --force ${OLD_TIP_PATH}`)));
+  assert.equal(getPr(db, sibling.id)!.lineage_tip_path, OLD_TIP_PATH);
+});
+
+test("runPrepare does not touch a tip that resolved to the same path again", async () => {
+  const db = openDb(":memory:");
+  const pr = insertPr(db, { url: "https://github.com/o/r/pull/7455", owner: "o", repo: "r", number: 7455 });
+  const same = "/data/worktrees/tips/o/r/9f1b2c3d4e5f";
+  updatePr(db, pr.id, { lineage_tip_path: same });
+  const calls: string[] = [];
+  const inner = lineageExec();
+  const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return inner(cmd, args); };
+  const result = await runPrepare({ db, exec, dataDir: "/data", onUpdate: () => {} }, pr.id);
+  assert.equal(result.lineage_tip_path, same);
+  assert.ok(!calls.some((c) => c.includes(`worktree remove --force ${same}`)));
 });

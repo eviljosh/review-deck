@@ -165,6 +165,10 @@ export interface PrRecord {
   base_sha: string | null;       // base commit the pinned diff was computed against (see base_mode)
   base_mode: string | null;      // "merge-base" (normal) | "base-tip" (base branch was rebased under a stacked PR)
   reviewed_size: string | null;  // JSON {additions,deletions,changedFiles} measured on the pinned diff
+  lineage_tip_ref: string | null;   // remote branch at the tip of this PR's lineage (a later PR in the stack)
+  lineage_tip_sha: string | null;   // commit that tip pointed at when prepare ran
+  lineage_tip_ahead: number | null; // commits between this PR's head and that tip
+  lineage_tip_path: string | null;  // read-only checkout of the tip, shared across the stack (null = none)
   latest_sha: string | null;     // most recently observed remote head (staleness signal)
   goal: string | null;           // triage: what problem / functionality this PR targets
   goal_verdict: string | null;   // triage: achieves | partially | does-not | unclear

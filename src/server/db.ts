@@ -131,6 +131,10 @@ const NEW_PR_COLUMNS: [string, string][] = [
   ["claude_transport", "TEXT"],
   ["base_mode", "TEXT"],
   ["reviewed_size", "TEXT"],
+  ["lineage_tip_ref", "TEXT"],
+  ["lineage_tip_sha", "TEXT"],
+  ["lineage_tip_ahead", "INTEGER"],
+  ["lineage_tip_path", "TEXT"],
 ];
 
 export function migrate(db: Database.Database): void {
@@ -283,6 +287,18 @@ export function listPrs(db: Database.Database): PrRecord[] {
   return db.prepare("SELECT * FROM prs ORDER BY id DESC").all() as PrRecord[];
 }
 
+/**
+ * How many OTHER PRs still point at a lineage-tip checkout. The tip is shared
+ * by every PR in a stack, so archiving one of them may only delete it once this
+ * count is zero — otherwise a sibling mid-review loses its context on disk.
+ */
+export function countPrsUsingTip(db: Database.Database, path: string, exceptId: number): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM prs WHERE lineage_tip_path = ? AND id != ?")
+    .get(path, exceptId) as { n: number };
+  return row.n;
+}
+
 const PR_COLUMNS = new Set([
   "title", "author", "additions", "deletions", "changed_files",
   "stage", "status", "error", "worktree_path",
@@ -290,6 +306,7 @@ const PR_COLUMNS = new Set([
   "headline", "finding_themes", "preface",
   "pr_state", "mergeable", "review_decision", "checks",
   "head_sha", "base_sha", "base_mode", "reviewed_size", "latest_sha",
+  "lineage_tip_ref", "lineage_tip_sha", "lineage_tip_ahead", "lineage_tip_path",
   "goal", "goal_verdict", "goal_explanation", "goal_gaps", "review_verdict",
   "file_guide", "reading_plan", "reviewed_files", "flow_delta", "prior_findings", "claude_transport",
 ]);

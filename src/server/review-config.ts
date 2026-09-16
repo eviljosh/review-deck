@@ -70,6 +70,14 @@ export interface ReviewConfig {
    * injected examples steer the model, so opt in deliberately.
    */
   feedbackLoop: boolean;
+  /**
+   * Give reviewing agents a second, read-only checkout at the tip of the PR's
+   * branch lineage. A stacked PR's reviewers otherwise see only their own slice
+   * and report the later slices' work as missing ("not tested", "dead code").
+   * On by default; turn it off to skip the lineage lookup and the extra
+   * checkout entirely (every downstream step no-ops on a null tip).
+   */
+  lineageTip: boolean;
 }
 
 export const DEFAULT_DIMENSIONS: DimensionDef[] = [
@@ -109,6 +117,7 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   robotMarker:
     "🤖 The rest of this review is AI-generated — an automated review posted at the reviewer's request. It is not a human review.",
   feedbackLoop: false,
+  lineageTip: true,
 };
 
 export const REVIEW_CONFIG_KEY = "review_config";
