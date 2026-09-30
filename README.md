@@ -110,11 +110,15 @@ It authenticates via either:
 Codex's model and reasoning effort are inherited from your `~/.codex/config.toml` unless
 overridden in the ⚙ Settings UI.
 
+To use GPT-6.1 Sol, enter `gpt-6.1-sol` in **Codex model** and keep **Codex reasoning
+effort** at `medium` (or choose `high` for deeper review). This model was verified
+through review-deck's read-only adapter with the SDK and bundled CLI pinned to `0.159.2`.
+
 If a review reports that a model "requires a newer version of Codex", upgrade the
 project's SDK and bundled CLI from the review-deck directory:
 
 ```bash
-npm install @openai/codex-sdk@latest
+npm install --save-exact @openai/codex-sdk@latest
 ```
 
 Restart the review-deck server and retry the review. Updating only the global CLI or
