@@ -76,6 +76,10 @@ The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved 
 
 The server logs which path it picked at startup (`claude auth: …`).
 
+The default Claude model is pinned to `claude-opus-5-5`, with the Agent SDK pinned
+to `0.3.312`. You can change the model in **⚙ Settings → Claude model**; an alias
+such as `opus` follows the version selected by the installed SDK or CLI.
+
 #### Claude transport: Agent SDK vs. `claude -p`
 
 By default the Claude reviewer runs through the bundled Agent SDK. In **⚙ Settings → Claude
@@ -107,14 +111,23 @@ It authenticates via either:
 - your **ChatGPT login** — run `codex login` once (stored in `~/.codex/auth.json`), **or**
 - an **`OPENAI_API_KEY`** in your environment / `.env`.
 
-Codex's model and reasoning effort are inherited from your `~/.codex/config.toml` unless
-overridden in the ⚙ Settings UI.
+Codex defaults to `gpt-6.1-sol` with `medium` reasoning effort, with the SDK and
+bundled CLI pinned to `0.165.0`. Choose `high` in **⚙ Settings → Codex reasoning
+effort** for deeper review. Clear **Codex model** or select **inherit** for effort
+to use the corresponding value from `~/.codex/config.toml`.
+
+Saved settings override the code defaults. Saving **⚙ Settings** stores every
+field, so an installation that has ever saved them keeps its **Claude model**
+(typically `opus`); set it to `claude-opus-5-5` to adopt the pin. A blank **Codex model**
+was never stored, so installations without an explicit Codex model move to
+`gpt-6.1-sol` automatically; clear the field and save to keep inheriting from
+`~/.codex/config.toml`.
 
 If a review reports that a model "requires a newer version of Codex", upgrade the
 project's SDK and bundled CLI from the review-deck directory:
 
 ```bash
-npm install @openai/codex-sdk@latest
+npm install --save-exact @openai/codex-sdk@latest
 ```
 
 Restart the review-deck server and retry the review. Updating only the global CLI or
@@ -220,3 +233,15 @@ docs/         design spec + milestone implementation plans
   Everything under `data/` is gitignored and safe to delete.
 - Per-stage artifacts (prompts, raw model output, findings) are written under `data/` for
   debugging.
+
+### Fresh restart of a stale failed attempt
+
+Integrations can `POST /api/prs/:id/restart` with
+`{expectedHeadSha, expectedBaseSha, expectedUpdatedAt}` from their last read.
+Unlike `/retry`, this restarts from prepare and fetches the current PR. It atomically
+rejects changed, archived, running, queued or completed attempts (409); missing
+preconditions return 400. The server also refuses while a pipeline controller is
+still active. Prior metadata/findings are saved under the PR's artifacts in a
+`restart-history-*` directory, and prior posted findings remain available to synthesis.
+The new pipeline still stops at the human posting gate. Restart the server to load
+this endpoint before using it from review-supervisor.

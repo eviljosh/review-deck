@@ -31,7 +31,7 @@ export interface ReviewConfig {
   finalizerEffort: "off" | "high" | "xhigh" | "max";
   maxConcurrentReviews: number;
   maxConcurrentPipelines: number;
-  /** Claude model alias passed to the agent SDK (e.g. "opus", "sonnet"). */
+  /** Claude model ID or alias passed to the agent SDK. */
   claudeModel: string;
   /**
    * Transport for Claude calls. "sdk" (default) runs through the bundled
@@ -49,11 +49,11 @@ export interface ReviewConfig {
    */
   claudeCliAuth: "env" | "stored-login";
   /**
-   * Codex model + reasoning effort. Leave undefined to inherit whatever the
-   * local `codex` CLI has configured in ~/.codex/config.toml.
+   * Codex model + reasoning effort. Save null to inherit ~/.codex/config.toml;
+   * omitted settings use the application defaults below.
    */
-  codexModel?: string;
-  codexReasoningEffort?: ReasoningEffort;
+  codexModel?: string | null;
+  codexReasoningEffort?: ReasoningEffort | null;
   /**
    * Per-engine-call timeout (ms). Deep-review calls can be slow — Codex on high
    * reasoning over a full diff, or a Claude dimension that explores the worktree
@@ -106,12 +106,11 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   // PRs trips subscription rate limits, lower maxConcurrentPipelines (2–3).
   maxConcurrentReviews: 4,
   maxConcurrentPipelines: 4,
-  claudeModel: "opus",
+  claudeModel: "claude-opus-5-5",
   claudeTransport: "sdk",
   claudeCliAuth: "env",
-  // codexModel unset → inherit the CLI's configured model. Reasoning effort
-  // pinned to "medium" for faster review passes; bump to "high" for deeper
-  // analysis at the cost of latency.
+  codexModel: "gpt-6.1-sol",
+  // Pin medium effort for faster review passes; bump to high for deeper analysis.
   codexReasoningEffort: "medium",
   engineTimeoutMs: 600_000,
   robotMarker:
@@ -194,7 +193,7 @@ export interface EngineModelOptions {
 
 /**
  * Per-engine model + reasoning-effort to pass to an agent run, derived from
- * config. Claude gets an explicit model alias; Codex gets whatever is configured
+ * config. Claude gets an explicit model ID or alias; Codex gets whatever is configured
  * (or nothing, to inherit the CLI's ~/.codex/config.toml defaults).
  */
 export function engineModelOptions(config: ReviewConfig, engineName: string): EngineModelOptions {

@@ -11,7 +11,7 @@ import { fetchLinearContext } from "./linear.ts";
 import { buildTriagePrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
-import type { EngineModelOptions } from "./review-config.ts";
+import { DEFAULT_REVIEW_CONFIG, type EngineModelOptions } from "./review-config.ts";
 
 export interface TriageDeps {
   db: Database.Database;
@@ -29,7 +29,7 @@ export interface TriageDeps {
 
 export async function runTriage(deps: TriageDeps, prId: number): Promise<PrRecord> {
   const { db, exec, engine, dataDir, onUpdate, onLog } = deps;
-  const modelOptions = deps.modelOptions ?? { model: "opus" };
+  const modelOptions = deps.modelOptions ?? { model: DEFAULT_REVIEW_CONFIG.claudeModel };
   const pr = getPr(db, prId);
   if (!pr) throw new Error(`pr ${prId} not found`);
 
