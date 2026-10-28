@@ -8,7 +8,7 @@ import { getPinnedDiff, diffPaths, diffSections, baseLabel, liveLineageTip } fro
 import { buildPlanPrompt, buildPlanRetryPrompt } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
-import type { EngineModelOptions } from "./review-config.ts";
+import { DEFAULT_REVIEW_CONFIG, type EngineModelOptions } from "./review-config.ts";
 
 const planFileSchema = z.object({
   path: z.string(),
@@ -62,7 +62,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "\n…(tr
  */
 export async function runPlan(deps: PlanDeps, prId: number): Promise<void> {
   const { db, exec, engine, dataDir, onUpdate, onLog } = deps;
-  const modelOptions = deps.modelOptions ?? { model: "opus" };
+  const modelOptions = deps.modelOptions ?? { model: DEFAULT_REVIEW_CONFIG.claudeModel };
   const pr = getPr(db, prId);
   if (!pr) throw new Error(`pr ${prId} not found`);
 

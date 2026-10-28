@@ -12,7 +12,7 @@ import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
 import { stageArtifactDir, writeArtifacts } from "./artifacts.ts";
-import type { EngineModelOptions } from "./review-config.ts";
+import { DEFAULT_REVIEW_CONFIG, engineModelOptions, type EngineModelOptions } from "./review-config.ts";
 
 // Same leniency as deep review: the finalizer can route through `ReportFindings`
 // too, and a parse failure here degrades the whole review to unmerged raw
@@ -77,7 +77,7 @@ function parsePriorFindings(json: string | null): PriorFinding[] | undefined {
 
 export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Finding[]): Promise<PrRecord> {
   const { db, exec, finalizer, dataDir, onUpdate, onLog } = deps;
-  const modelOptions = deps.modelOptions ?? { model: finalizer.name === "claude" ? "opus" : undefined };
+  const modelOptions = deps.modelOptions ?? engineModelOptions(DEFAULT_REVIEW_CONFIG, finalizer.name);
   const pr = getPr(db, prId);
   if (!pr) throw new Error(`pr ${prId} not found`);
   onUpdate(updatePr(db, prId, { stage: "synthesize", status: "running", error: null }));

@@ -142,10 +142,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <input value={settings.claudeModel} onChange={(e) => patch({ claudeModel: e.target.value })} />
           </label>
           <label>Codex model <span className="hint-inline">(blank = inherit CLI config)</span>
-            <input value={settings.codexModel ?? ""} onChange={(e) => patch({ codexModel: e.target.value || undefined })} />
+            <input value={settings.codexModel ?? ""} onChange={(e) => patch({ codexModel: e.target.value || null })} />
           </label>
           <label>Codex reasoning effort
-            <select value={settings.codexReasoningEffort ?? ""} onChange={(e) => patch({ codexReasoningEffort: e.target.value || undefined })}>
+            <select value={settings.codexReasoningEffort ?? ""} onChange={(e) => patch({ codexReasoningEffort: e.target.value || null })}>
               <option value="">inherit</option>
               <option value="low">low</option>
               <option value="medium">medium</option>

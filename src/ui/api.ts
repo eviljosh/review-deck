@@ -13,8 +13,8 @@ export interface ReviewSettings {
   claudeModel: string;
   claudeTransport: "sdk" | "cli";
   claudeCliAuth: "env" | "stored-login";
-  codexModel?: string;
-  codexReasoningEffort?: string;
+  codexModel?: string | null;
+  codexReasoningEffort?: string | null;
   engineTimeoutMs: number;
   robotMarker: string;
   feedbackLoop: boolean;

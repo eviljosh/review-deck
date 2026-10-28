@@ -7,7 +7,7 @@ import type { LlmEngine } from "../src/server/engines/types.ts";
 import type { WsMessage } from "../src/shared/types.ts";
 import { WsHub } from "../src/server/ws.ts";
 import { buildApp } from "../src/server/app.ts";
-import { DEFAULT_REVIEW_CONFIG } from "../src/server/review-config.ts";
+import { DEFAULT_REVIEW_CONFIG, engineModelOptions } from "../src/server/review-config.ts";
 
 const triageJson = JSON.stringify({ summary: "s", danger: { level: "low", reasons: [], flags: [] } });
 const planJson = JSON.stringify({ cohorts: [{ label: "All", why: "", files: [{ path: "x", class: "substantive", role: "r" }] }] });
@@ -585,7 +585,7 @@ test("GET /api/prs/:id/runs/:rid/output returns the persisted stream + error", a
 test("GET/PUT /api/settings round-trips a config patch", async () => {
   const app = buildApp(deps());
   const before = await app.inject({ method: "GET", url: "/api/settings" });
-  assert.equal(before.json().claudeModel, "opus");
+  assert.equal(before.json().claudeModel, "claude-opus-5-5");
 
   const put = await app.inject({ method: "PUT", url: "/api/settings", payload: { claudeModel: "sonnet", robotMarker: "🤖 mine" } });
   assert.equal(put.statusCode, 200);
@@ -594,6 +594,23 @@ test("GET/PUT /api/settings round-trips a config patch", async () => {
   const after = await app.inject({ method: "GET", url: "/api/settings" });
   assert.equal(after.json().claudeModel, "sonnet");
   assert.equal(after.json().robotMarker, "🤖 mine");
+});
+
+test("settings can persist Codex CLI inheritance after saving explicit pins", async () => {
+  const app = buildApp(deps());
+  await app.inject({ method: "PUT", url: "/api/settings", payload: {
+    codexModel: "gpt-6.1-sol", codexReasoningEffort: "high",
+  } });
+  const cleared = await app.inject({ method: "PUT", url: "/api/settings", payload: {
+    codexModel: null, codexReasoningEffort: null,
+  } });
+  assert.equal(cleared.statusCode, 200);
+  // A later unrelated patch must not restore either pin.
+  await app.inject({ method: "PUT", url: "/api/settings", payload: { robotMarker: "custom" } });
+  const after = await app.inject({ method: "GET", url: "/api/settings" });
+  assert.equal(after.json().codexModel, null);
+  assert.equal(after.json().codexReasoningEffort, null);
+  assert.deepEqual(engineModelOptions(after.json(), "codex"), {});
 });
 
 test("adding a PR creates a repo-config row; PUT /api/repos/:owner/:repo saves guidance", async () => {

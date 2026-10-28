@@ -76,6 +76,10 @@ The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved 
 
 The server logs which path it picked at startup (`claude auth: …`).
 
+The default Claude model is pinned to `claude-opus-5-5`, with the Agent SDK pinned
+to `0.3.312`. You can change the model in **⚙ Settings → Claude model**; an alias
+such as `opus` follows the version selected by the installed SDK or CLI.
+
 #### Claude transport: Agent SDK vs. `claude -p`
 
 By default the Claude reviewer runs through the bundled Agent SDK. In **⚙ Settings → Claude
@@ -107,12 +111,14 @@ It authenticates via either:
 - your **ChatGPT login** — run `codex login` once (stored in `~/.codex/auth.json`), **or**
 - an **`OPENAI_API_KEY`** in your environment / `.env`.
 
-Codex's model and reasoning effort are inherited from your `~/.codex/config.toml` unless
-overridden in the ⚙ Settings UI.
+Codex defaults to `gpt-6.1-sol` with `medium` reasoning effort, with the SDK and
+bundled CLI pinned to `0.165.0`. Choose `high` in **⚙ Settings → Codex reasoning
+effort** for deeper review. Clear **Codex model** or select **inherit** for effort
+to use the corresponding value from `~/.codex/config.toml`.
 
-To use GPT-6.1 Sol, enter `gpt-6.1-sol` in **Codex model** and keep **Codex reasoning
-effort** at `medium` (or choose `high` for deeper review). This model was verified
-through review-deck's read-only adapter with the SDK and bundled CLI pinned to `0.159.2`.
+Saved settings override the code defaults. Existing installations should set
+**Claude model** to `claude-opus-5-5` and **Codex model** to `gpt-6.1-sol` in
+**⚙ Settings** to adopt these pins.
 
 If a review reports that a model "requires a newer version of Codex", upgrade the
 project's SDK and bundled CLI from the review-deck directory:
