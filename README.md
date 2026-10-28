@@ -116,9 +116,12 @@ bundled CLI pinned to `0.165.0`. Choose `high` in **⚙ Settings → Codex reaso
 effort** for deeper review. Clear **Codex model** or select **inherit** for effort
 to use the corresponding value from `~/.codex/config.toml`.
 
-Saved settings override the code defaults. Existing installations should set
-**Claude model** to `claude-opus-5-5` and **Codex model** to `gpt-6.1-sol` in
-**⚙ Settings** to adopt these pins.
+Saved settings override the code defaults. Saving **⚙ Settings** stores every
+field, so an installation that has ever saved them keeps its **Claude model**
+(typically `opus`); set it to `claude-opus-5-5` to adopt the pin. A blank **Codex model**
+was never stored, so installations without an explicit Codex model move to
+`gpt-6.1-sol` automatically; clear the field and save to keep inheriting from
+`~/.codex/config.toml`.
 
 If a review reports that a model "requires a newer version of Codex", upgrade the
 project's SDK and bundled CLI from the review-deck directory:
