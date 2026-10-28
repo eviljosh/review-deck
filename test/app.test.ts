@@ -839,3 +839,59 @@ test("archive keeps a lineage-tip checkout a sibling PR is still using", async (
   assert.ok(!joined.some((c) => c.includes(tip)));
   assert.equal(getPr(d.db, sibling.id)!.lineage_tip_path, tip);
 });
+
+test("fresh restart is guarded, clears stale output, preserves history, and starts prepare", async () => {
+  const { mkdtempSync, readdirSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const d = deps();
+  d.dataDir = mkdtempSync(join(tmpdir(), "deck-restart-"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let prepareCalls = 0;
+  d.exec = async () => { prepareCalls++; await gate; throw new Error("fixture stops prepare"); };
+  const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/7", owner: "o", repo: "r", number: 7 });
+  updatePr(d.db, pr.id, { stage: "deep_review", status: "failed", head_sha: "old", base_sha: "base", summary: "stale", prior_findings: "previous posted evidence" });
+  insertFinding(d.db, pr.id, { engine: "codex", dimension: "tests", severity: "optional", file: "x", line: 1, side: "RIGHT", what: "old finding", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
+  const before = getPr(d.db, pr.id)!;
+  const app = buildApp(d);
+  const payload = { expectedHeadSha: "old", expectedBaseSha: "base", expectedUpdatedAt: before.updated_at };
+  try {
+    const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/restart`, payload });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().restartedFrom, "prepare");
+    assert.equal(getPr(d.db, pr.id)!.stage, "prepare");
+    assert.equal(getPr(d.db, pr.id)!.summary, null);
+    assert.equal(getPr(d.db, pr.id)!.prior_findings, "previous posted evidence");
+    assert.equal(listFindings(d.db, pr.id).length, 0);
+    assert.equal(prepareCalls, 1);
+    const history = readdirSync(join(d.dataDir, "artifacts", String(pr.id))).find((n) => n.startsWith("restart-history-"))!;
+    const saved = JSON.parse(readFileSync(join(d.dataDir, "artifacts", String(pr.id), history, "state.json"), "utf8"));
+    assert.equal(saved.pr.head_sha, "old");
+    assert.equal(saved.findings[0].what, "old finding");
+    const duplicate = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/restart`, payload });
+    assert.equal(duplicate.statusCode, 409);
+  } finally {
+    release();
+    for (let i = 0; i < 50 && getPr(d.db, pr.id)!.status === "running"; i++) await setTimeout(5);
+    await app.close(); d.db.close(); rmSync(d.dataDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh restart rejects missing preconditions, changed attempts and non-idle records", async () => {
+  for (const variant of ["missing", "head", "base", "timestamp", "running", "pending", "done", "archived"]) {
+    const d = deps();
+    d.exec = async () => { assert.fail("Rejected restart must not launch a pipeline"); };
+    const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/7", owner: "o", repo: "r", number: 7 });
+    updatePr(d.db, pr.id, { status: "failed", stage: "deep_review", head_sha: "old", base_sha: "base", summary: "keep" });
+    const before = getPr(d.db, pr.id)!;
+    const payload = { expectedHeadSha: variant === "head" ? "different" : "old", expectedBaseSha: variant === "base" ? "different" : "base", expectedUpdatedAt: variant === "timestamp" ? "earlier" : before.updated_at };
+    if (["running", "pending", "done"].includes(variant)) updatePr(d.db, pr.id, { status: variant as "running" | "pending" | "done" });
+    if (variant === "archived") d.db.prepare("UPDATE prs SET archived_at='now' WHERE id=?").run(pr.id);
+    const app = buildApp(d);
+    const res = await app.inject({ method: "POST", url: `/api/prs/${pr.id}/restart`, payload: variant === "missing" ? {} : payload });
+    assert.equal(res.statusCode, variant === "missing" ? 400 : 409, variant);
+    assert.equal(getPr(d.db, pr.id)!.summary, "keep");
+    await app.close(); d.db.close();
+  }
+});

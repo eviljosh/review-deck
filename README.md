@@ -224,3 +224,15 @@ docs/         design spec + milestone implementation plans
   Everything under `data/` is gitignored and safe to delete.
 - Per-stage artifacts (prompts, raw model output, findings) are written under `data/` for
   debugging.
+
+### Fresh restart of a stale failed attempt
+
+Integrations can `POST /api/prs/:id/restart` with
+`{expectedHeadSha, expectedBaseSha, expectedUpdatedAt}` from their last read.
+Unlike `/retry`, this restarts from prepare and fetches the current PR. It atomically
+rejects changed, archived, running, queued or completed attempts (409); missing
+preconditions return 400. The server also refuses while a pipeline controller is
+still active. Prior metadata/findings are saved under the PR's artifacts in a
+`restart-history-*` directory, and prior posted findings remain available to synthesis.
+The new pipeline still stops at the human posting gate. Restart the server to load
+this endpoint before using it from review-supervisor.

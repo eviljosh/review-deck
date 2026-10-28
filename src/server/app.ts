@@ -1,4 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import Fastify, { type FastifyInstance } from "fastify";
 import pLimit from "p-limit";
 import type Database from "better-sqlite3";
@@ -10,7 +12,7 @@ import { loadReviewConfig, saveReviewConfig, type ReviewConfig } from "./review-
 import { createPrBodySchema, type PrRecord, type ReviewEvent, type Stage } from "../shared/types.ts";
 import { findPrByUrl, getPr, insertPr, listPrs, listFindings, listRuns, getSetting, setSetting, setFindingSelected, setAllFindingsSelected, updateFindingText, DEFAULT_PREFACE_KEY, updatePr, deletePr, setArchived, listArchivedOlderThan, markSeen, listRepoConfigs, getRepoConfig, upsertRepoConfig, insertComment, listComments, deleteComment, updateCommentBody, replaceFindings, countPrsUsingTip } from "./db.ts";
 import { getPinnedDiff } from "./diff.ts";
-import { removeArtifacts } from "./artifacts.ts";
+import { removeArtifacts, stageArtifactDir, writeArtifacts } from "./artifacts.ts";
 import { buildReviewMarkdown } from "../shared/review-markdown.ts";
 import { fetchPrConversation, fetchPrStatus, postIssueComment, replyToReviewComment } from "./gh.ts";
 import { parsePrUrl } from "./parse-url.ts";
@@ -134,6 +136,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { created, existing };
   });
 
+  function resetReview(pr: PrRecord): void {
+    const id = pr.id;
+    // Fresh re-run: snapshot what the last posted review said (the finalizer
+    // checks the new diff against it), then clear the old review outright so
+    // stale findings/summaries never linger in the UI, survive a failed
+    // re-run, or get merged into the next posted review.
+    const postedFindings = listFindings(db, id).filter((f) => f.posted);
+    const snapshot = postedFindings.length > 0
+      ? JSON.stringify(postedFindings.map((f) => ({
+          file: f.file, line: f.line, severity: f.severity, what: f.what, suggestedFix: f.suggestedFix,
+        })))
+      : pr.prior_findings; // nothing newly posted — keep the older snapshot, if any
+    replaceFindings(db, id, []);
+    updatePr(db, id, {
+      prior_findings: snapshot ?? null,
+      summary: null, headline: null, danger_level: null, danger_reasons: null,
+      focus_areas: null, danger_flags: null, finding_themes: null, discussion: null,
+      goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
+      review_verdict: null, file_guide: null, reading_plan: null, reviewed_files: null, flow_delta: null,
+    });
+    hub.broadcast({ type: "findings_updated", prId: id });
+  }
+
   app.post<{ Params: { id: string } }>("/api/prs/:id/retry", async (req, reply) => {
     const id = Number(req.params.id);
     const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
@@ -148,31 +173,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // adds a second review on GitHub; the UI confirms before retrying those.
     const midPipeline: Stage[] = ["prepare", "triage", "deep_review", "synthesize"];
     const resumeFrom = midPipeline.includes(pr.stage) ? pr.stage : undefined;
-    if (!resumeFrom) {
-      // Fresh re-run: snapshot what the last posted review said (the finalizer
-      // checks the new diff against it), then clear the old review outright so
-      // stale findings/summaries never linger in the UI, survive a failed
-      // re-run, or get merged into the next posted review.
-      const postedFindings = listFindings(db, id).filter((f) => f.posted);
-      const snapshot = postedFindings.length > 0
-        ? JSON.stringify(postedFindings.map((f) => ({
-            file: f.file, line: f.line, severity: f.severity, what: f.what, suggestedFix: f.suggestedFix,
-          })))
-        : pr.prior_findings; // nothing newly posted — keep the older snapshot, if any
-      replaceFindings(db, id, []);
-      updatePr(db, id, {
-        prior_findings: snapshot ?? null,
-        summary: null, headline: null, danger_level: null, danger_reasons: null,
-        focus_areas: null, danger_flags: null, finding_themes: null, discussion: null,
-        goal: null, goal_verdict: null, goal_explanation: null, goal_gaps: null,
-        review_verdict: null, file_guide: null, reading_plan: null, reviewed_files: null, flow_delta: null,
-      });
-      hub.broadcast({ type: "findings_updated", prId: id });
-    }
+    if (!resumeFrom) resetReview(pr);
     hub.broadcast({ type: "pr_log_reset", prId: id });
     hub.broadcast({ type: "pr_updated", pr: getPr(db, id)! });
     launch(id, `retry pipeline failed for ${id}`, resumeFrom);
     return { ok: true };
+  });
+
+  // Explicit fresh restart, distinct from retry's failed-stage resume semantics.
+  // The caller must bind the request to the exact idle attempt it inspected.
+  const restartSchema = z.object({
+    expectedHeadSha: z.string().min(1),
+    expectedBaseSha: z.string().nullable(),
+    expectedUpdatedAt: z.string().min(1),
+  }).strict();
+  app.post<{ Params: { id: string } }>("/api/prs/:id/restart", async (req, reply) => {
+    const parsed = restartSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Expected head, base and update timestamp are required" });
+    const id = Number(req.params.id);
+    const pr = Number.isInteger(id) ? getPr(db, id) : undefined;
+    if (!pr) return reply.code(404).send({ error: "pr not found" });
+    if (running.has(id)) return reply.code(409).send({ error: "pipeline still active" });
+    const claimed = db.transaction(() => {
+      const claim = db.prepare(`UPDATE prs SET status='running', stage='prepare', error=NULL
+        WHERE id=? AND status IN ('failed','cancelled') AND archived_at IS NULL
+        AND head_sha=? AND base_sha IS ? AND updated_at=?`).run(
+          id, parsed.data.expectedHeadSha, parsed.data.expectedBaseSha, parsed.data.expectedUpdatedAt);
+      if (!claim.changes) return false;
+      writeArtifacts(stageArtifactDir(dataDir, id, `restart-history-${randomUUID()}`), {
+        "state.json": JSON.stringify({ pr, findings: listFindings(db, id) }, null, 2),
+      });
+      resetReview(pr);
+      return true;
+    })();
+    if (!claimed) return reply.code(409).send({ error: "review changed, is active, or is not an unarchived failed attempt" });
+    hub.broadcast({ type: "pr_log_reset", prId: id });
+    hub.broadcast({ type: "pr_updated", pr: getPr(db, id)! });
+    launch(id, `fresh restart failed for ${id}`);
+    return { ok: true, restartedFrom: "prepare" };
   });
 
   app.post<{ Params: { id: string } }>("/api/prs/:id/cancel", async (req, reply) => {
