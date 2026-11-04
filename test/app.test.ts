@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout } from "node:timers/promises";
-import { openDb, insertFinding, listFindings, getPr, updatePr, insertPr, setSetting } from "../src/server/db.ts";
+import { openDb, insertFinding, listFindings, getPr, updatePr, insertPr, setSetting, reconcileInterrupted } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
 import type { LlmEngine } from "../src/server/engines/types.ts";
 import type { WsMessage } from "../src/shared/types.ts";
@@ -869,7 +869,8 @@ test("fresh restart is guarded, clears stale output, preserves history, and star
     let prepareCalls = 0;
     d.exec = async () => { prepareCalls++; await gate; throw new Error("fixture stops prepare"); };
     const pr = insertPr(d.db, { url: "https://github.com/o/r/pull/7", owner: "o", repo: "r", number: 7 });
-    updatePr(d.db, pr.id, { stage: incomplete ? "prepare" : "deep_review", status: "failed", head_sha: incomplete ? null : "old", base_sha: incomplete ? null : "base", summary: "stale", prior_findings: "previous posted evidence" });
+    updatePr(d.db, pr.id, { stage: incomplete ? "prepare" : "deep_review", status: incomplete ? "pending" : "failed", head_sha: incomplete ? null : "old", base_sha: incomplete ? null : "base", summary: "stale", prior_findings: "previous posted evidence" });
+    if (incomplete) assert.equal(reconcileInterrupted(d.db), 1);
     insertFinding(d.db, pr.id, { engine: "codex", dimension: "tests", severity: "optional", file: "x", line: 1, side: "RIGHT", what: "old finding", why: "y", suggestedFix: "f", anchorable: true, agreement: false });
     const before = getPr(d.db, pr.id)!;
     const app = buildApp(d);

@@ -42,6 +42,8 @@ an "⇡ new commits" staleness badge, danger/recent/repo sorting, and keyboard n
 
 The supervisor can use `POST /api/prs/:id/restart` to restart a failed attempt from prepare with the observed head, base, and update timestamp. Missing head/base pins are supported for incomplete preparation; a null head is accepted only in the prepare stage. The endpoint atomically rejects changed, active, or archived attempts and preserves prior review history.
 
+On startup, interrupted running jobs and unarchived pending jobs are marked failed and retryable. Pending jobs belonged to the previous process's in-memory queue; they cannot make progress after a restart. The supervisor can recover these through its bounded preparation restart. Live queued jobs are not reclaimed based on elapsed time.
+
 ## Prerequisites
 
 - **Node.js 22+**.

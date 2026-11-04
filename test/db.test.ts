@@ -77,6 +77,32 @@ test("reconcileInterrupted preserves an existing error message", () => {
   assert.equal(getPr(db, pr.id)!.error, "boom");
 });
 
+test("startup reconciles abandoned pending jobs without touching archived or settled work", () => {
+  const db = openDb(":memory:");
+  try {
+    const pending = insertPr(db, { url: "https://github.com/o/r/pull/1", owner: "o", repo: "r", number: 1 });
+    // No run row exists: this job was waiting in the previous process's limiter.
+    db.prepare("UPDATE prs SET updated_at='2026-01-01' WHERE id=?").run(pending.id);
+    const archived = insertPr(db, { url: "https://github.com/o/r/pull/2", owner: "o", repo: "r", number: 2 });
+    setArchived(db, archived.id, true);
+    const settled = ["done", "failed", "cancelled", "degraded"].map((status, i) => {
+      const pr = insertPr(db, { url: `https://github.com/o/r/pull/${i + 3}`, owner: "o", repo: "r", number: i + 3 });
+      return updatePr(db, pr.id, { status: status as PrRecord["status"], error: "preserve prior state" });
+    });
+    assert.equal(reconcileInterrupted(db), 1);
+    const recovered = getPr(db, pending.id)!;
+    assert.equal(recovered.status, "failed");
+    assert.equal(recovered.stage, "prepare");
+    assert.equal(recovered.head_sha, null);
+    assert.match(recovered.error!, /restarted while queued/);
+    assert.notEqual(recovered.updated_at, "2026-01-01");
+    assert.deepEqual(listRuns(db, pending.id), []);
+    assert.equal(getPr(db, archived.id)!.status, "pending");
+    for (const pr of settled) assert.deepEqual(getPr(db, pr.id), pr);
+    assert.equal(reconcileInterrupted(db), 0, "Repeated reconciliation must not create a retry loop");
+  } finally { db.close(); }
+});
+
 test("updatePr patches columns and bumps updated_at", async () => {
   const { db, pr } = seed();
   await new Promise((r) => setTimeout(r, 5));
