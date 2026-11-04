@@ -167,15 +167,20 @@ export function openDb(path: string): Database.Database {
 
 /**
  * Reset orphaned in-flight work left by a previous crash/kill. A freshly started
- * process has no pipelines running, so any row still at status='running' can
- * never complete — and the retry-in-flight guard (409) would refuse it forever.
- * Mark such PRs (and their open run rows) failed so they become retryable.
+ * process has no pipelines or in-memory queue, so running rows and unarchived
+ * pending rows cannot complete. Mark them (and open run rows) failed so the
+ * normal guarded recovery can retry them. Never use age to reclaim a live queue.
  * Returns the number of PRs reconciled.
  */
 export function reconcileInterrupted(db: Database.Database): number {
   const info = db
     .prepare(
-      "UPDATE prs SET status='failed', error=COALESCE(error, 'interrupted — server restarted while running'), updated_at=datetime('now','subsec') WHERE status='running'",
+      `UPDATE prs SET status='failed',
+        error=COALESCE(error, CASE WHEN status='pending'
+          THEN 'interrupted — server restarted while queued'
+          ELSE 'interrupted — server restarted while running' END),
+        updated_at=datetime('now','subsec')
+        WHERE status='running' OR (status='pending' AND archived_at IS NULL)`,
     )
     .run();
   db.prepare(
