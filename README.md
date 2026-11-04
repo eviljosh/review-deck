@@ -40,6 +40,8 @@ run cancellation, archive (with a 30-day purge and worktree cleanup), a seen/uns
 an "⇡ new commits" staleness badge, danger/recent/repo sorting, and keyboard nav
 (`j`/`k`/`o`/`esc`).
 
+The supervisor can use `POST /api/prs/:id/restart` to restart a failed attempt from prepare with the observed head, base, and update timestamp. Missing head/base pins are supported for incomplete preparation; a null head is accepted only in the prepare stage. The endpoint atomically rejects changed, active, or archived attempts and preserves prior review history.
+
 ## Prerequisites
 
 - **Node.js 22+**.

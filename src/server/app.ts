@@ -183,7 +183,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Explicit fresh restart, distinct from retry's failed-stage resume semantics.
   // The caller must bind the request to the exact idle attempt it inspected.
   const restartSchema = z.object({
-    expectedHeadSha: z.string().min(1),
+    expectedHeadSha: z.string().min(1).nullable(),
     expectedBaseSha: z.string().nullable(),
     expectedUpdatedAt: z.string().min(1),
   }).strict();
@@ -197,7 +197,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const claimed = db.transaction(() => {
       const claim = db.prepare(`UPDATE prs SET status='running', stage='prepare', error=NULL
         WHERE id=? AND status IN ('failed','cancelled') AND archived_at IS NULL
-        AND head_sha=? AND base_sha IS ? AND updated_at=?`).run(
+        AND (head_sha IS NOT NULL OR stage='prepare')
+        AND head_sha IS ? AND base_sha IS ? AND updated_at=?`).run(
           id, parsed.data.expectedHeadSha, parsed.data.expectedBaseSha, parsed.data.expectedUpdatedAt);
       if (!claim.changes) return false;
       writeArtifacts(stageArtifactDir(dataDir, id, `restart-history-${randomUUID()}`), {
