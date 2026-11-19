@@ -40,6 +40,10 @@ run cancellation, archive (with a 30-day purge and worktree cleanup), a seen/uns
 an "⇡ new commits" staleness badge, danger/recent/repo sorting, and keyboard nav
 (`j`/`k`/`o`/`esc`).
 
+Other services can use `POST /api/prs/:id/restart` to restart a failed attempt from prepare with the observed head, base, and update timestamp. Missing head/base pins are supported for incomplete preparation; a null head is accepted only in the prepare stage. The endpoint atomically rejects changed, active, or archived attempts and preserves prior review history.
+
+On startup, interrupted running jobs and unarchived pending jobs are marked failed and retryable. Pending jobs belonged to the previous process's in-memory queue; they cannot make progress after a restart. Other services can recover these through the guarded restart endpoint. Live queued jobs are not reclaimed based on elapsed time.
+
 ## Prerequisites
 
 - **Node.js 22+**.
@@ -76,9 +80,10 @@ The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved 
 
 The server logs which path it picked at startup (`claude auth: …`).
 
-The default Claude model is pinned to `claude-opus-5-5`, with the Agent SDK pinned
-to `0.3.312`. You can change the model in **⚙ Settings → Claude model**; an alias
-such as `opus` follows the version selected by the installed SDK or CLI.
+The default Claude model is `sonnet` to keep review costs down, with the Agent SDK
+pinned to `0.3.312`. The alias follows the Sonnet version selected by the installed
+SDK or CLI. This applies to all Claude review stages, including finalization. You
+can override it in **⚙ Settings → Claude model** when a review needs another model.
 
 #### Claude transport: Agent SDK vs. `claude -p`
 
@@ -118,8 +123,8 @@ to use the corresponding value from `~/.codex/config.toml`.
 
 Saved settings override the code defaults. Saving **⚙ Settings** stores every
 field, so an installation that has ever saved them keeps its **Claude model**
-(typically `opus`); set it to `claude-opus-5-5` to adopt the pin. A blank **Codex model**
-was never stored, so installations without an explicit Codex model move to
+(for example, `opus` or `claude-opus-5-5`); set it to `sonnet` to adopt the cheaper
+default. A blank **Codex model** was never stored, so installations without an explicit Codex model move to
 `gpt-6.1-sol` automatically; clear the field and save to keep inheriting from
 `~/.codex/config.toml`.
 
@@ -244,4 +249,4 @@ preconditions return 400. The server also refuses while a pipeline controller is
 still active. Prior metadata/findings are saved under the PR's artifacts in a
 `restart-history-*` directory, and prior posted findings remain available to synthesis.
 The new pipeline still stops at the human posting gate. Restart the server to load
-this endpoint before using it from review-supervisor.
+this endpoint before calling it from other services.
