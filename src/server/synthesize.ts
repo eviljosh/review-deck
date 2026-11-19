@@ -7,7 +7,7 @@ import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts"
 import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
 import { lenientFinding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
-import { findingDiffEvidence, getReviewDiff, liveLineageTip } from "./diff.ts";
+import { findingDiffEvidence, getReviewDiff, liveLineageTip, noDiffEvidence } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
@@ -112,7 +112,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       priorFindings: parsePriorFindings(pr.prior_findings),
       planFiles: parsePlanFiles(pr.reading_plan),
       tip,
-      diffEvidence: fromPrepare ? findingDiffEvidence(diff, raw) : { excerpts: [], incomplete: true },
+      diffEvidence: fromPrepare ? findingDiffEvidence(diff, raw) : noDiffEvidence(raw),
     });
     const res = await finalizer.run(
       {

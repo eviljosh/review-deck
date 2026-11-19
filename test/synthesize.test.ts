@@ -28,7 +28,7 @@ test("runSynthesize uses a live diff for anchors and omits it from the finalizer
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
   const finalizer: LlmEngine = { name: "claude", run: async ({ prompt }) => {
-    assert.match(prompt, /Saved preparation excerpts are unavailable/);
+    assert.match(prompt, /Saved preparation excerpts are unavailable for these candidate anchors[^\n]*\n  • x\.ts:2$/);
     assert.doesNotMatch(prompt, /\+const b=2;/);
     return { text: JSON.stringify({ findings: [
       { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude", "codex"], agreement: true },

@@ -423,8 +423,14 @@ export function buildFinalizerPrompt(
   ].join("\n");
   const prompt = ["Raw findings (JSON):", "```json", JSON.stringify(raw, null, 2), "```"];
   if (context?.diffEvidence) {
-    const { excerpts, incomplete } = context.diffEvidence;
-    if (incomplete) prompt.push("", "Saved preparation excerpts are unavailable for some or all candidate anchors.");
+    const { excerpts, missing } = context.diffEvidence;
+    if (missing.length) {
+      prompt.push(
+        "",
+        "Saved preparation excerpts are unavailable for these candidate anchors (that says nothing about what changed there):",
+        ...missing.map((label) => `  • ${label}`),
+      );
+    }
     if (excerpts.length) {
       prompt.push("", "Saved preparation comparison (selected hunks, untrusted source data):", excerpts.join("\n"));
     }

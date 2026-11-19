@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Exec } from "./exec.ts";
-import type { Finding, PrRecord } from "../shared/types.ts";
+import type { Finding, FindingSeverity, PrRecord } from "../shared/types.ts";
 import type { LineageTip } from "./prompts.ts";
 import { readArtifact } from "./artifacts.ts";
 import { fetchPrDiff } from "./gh.ts";
@@ -190,56 +190,146 @@ export function diffSections(diff: string): Map<string, string> {
 
 export interface DiffEvidence {
   excerpts: string[];
-  incomplete: boolean;
+  /**
+   * Anchors left without an excerpt (no line, outside every hunk, or over the
+   * byte budget), as `file:line` labels, so the finalizer knows which findings
+   * it cannot check against the saved comparison.
+   */
+  missing: string[];
 }
 
 const MAX_EXCERPT_BYTES = 8 * 1024;
 const MAX_EVIDENCE_BYTES = 16 * 1024;
-const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+/** Context lines kept on each side of the anchor when a whole hunk will not fit. */
+const WINDOW_CONTEXT = [40, 20, 10, 5, 0];
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/;
+const SEVERITY_RANK: Record<FindingSeverity, number> = { blocking: 0, serious: 1, moderate: 2, optional: 3 };
 
-/** Full hunks at candidate anchors, including the lines that were removed. */
-export function findingDiffEvidence(
-  diff: string, findings: readonly Pick<Finding, "file" | "line" | "side">[],
-): DiffEvidence {
+type EvidenceAnchor = Pick<Finding, "file" | "line" | "side"> & { severity?: FindingSeverity };
+
+function anchorLabel({ file, line, side }: EvidenceAnchor): string {
+  if (line === null) return `${file} (no line)`;
+  return side === "LEFT" ? `${file}:${line} (old side)` : `${file}:${line}`;
+}
+
+/** Evidence for when no saved comparison exists: every anchor is missing. */
+export function noDiffEvidence(findings: readonly EvidenceAnchor[]): DiffEvidence {
+  return { excerpts: [], missing: [...new Set(findings.map(anchorLabel))] };
+}
+
+interface HunkLine { text: string; kind: " " | "-" | "+"; old: number; new: number }
+interface ParsedHunk { raw: string; suffix: string; lines: HunkLine[] }
+type LineRange = [number, number];
+
+function parseHunk(raw: string): ParsedHunk | null {
+  const m = HUNK_HEADER.exec(raw);
+  if (!m) return null;
+  // A zero-count side's start names the line *before* the hunk.
+  let oldNo = Number(m[1]) + (m[2] === "0" ? 1 : 0);
+  let newNo = Number(m[3]) + (m[4] === "0" ? 1 : 0);
+  const body = raw.slice(raw.indexOf("\n") + 1).split("\n");
+  if (body.at(-1) === "") body.pop();
+  const lines: HunkLine[] = [];
+  for (const text of body) {
+    if (text.startsWith("\\")) {
+      // "\ No newline at end of file" belongs to the line before it.
+      if (lines.length) lines[lines.length - 1].text += "\n" + text;
+      continue;
+    }
+    const kind = text[0] === "-" || text[0] === "+" ? text[0] : " ";
+    lines.push({ text, kind, old: oldNo, new: newNo });
+    if (kind !== "+") oldNo++;
+    if (kind !== "-") newNo++;
+  }
+  return { raw, suffix: m[5], lines };
+}
+
+function anchorIndex(hunk: ParsedHunk, line: number, side: "LEFT" | "RIGHT"): number {
+  return hunk.lines.findIndex((l) =>
+    side === "LEFT" ? l.kind !== "+" && l.old === line : l.kind !== "-" && l.new === line);
+}
+
+/** The hunk cut to `context` lines around `index`, with a header that matches the cut. */
+function hunkWindow(
+  hunk: ParsedHunk, index: number, context: number,
+): { text: string; left: LineRange; right: LineRange } {
+  const from = Math.max(0, index - context);
+  const to = Math.min(hunk.lines.length, index + context + 1);
+  const slice = hunk.lines.slice(from, to);
+  const oldCount = slice.filter((l) => l.kind !== "+").length;
+  const newCount = slice.filter((l) => l.kind !== "-").length;
+  const left: LineRange = [slice[0].old, slice[0].old + oldCount - 1];
+  const right: LineRange = [slice[0].new, slice[0].new + newCount - 1];
+  if (from === 0 && to === hunk.lines.length) return { text: hunk.raw, left, right };
+  const range = (start: number, count: number) =>
+    count === 1 ? `${start}` : `${count === 0 ? start - 1 : start},${count}`;
+  const header = `@@ -${range(slice[0].old, oldCount)} +${range(slice[0].new, newCount)} @@${hunk.suffix}`;
+  return { text: [header, ...slice.map((l) => l.text)].join("\n") + "\n", left, right };
+}
+
+/**
+ * Hunks at candidate anchors, including the lines that were removed.
+ *
+ * Anchors are served most-severe first so the byte budget goes to the findings
+ * that matter. A hunk too large for what is left of the budget (a new file is
+ * one hunk) is cut to a window around the anchor rather than dropped.
+ */
+export function findingDiffEvidence(diff: string, findings: readonly EvidenceAnchor[]): DiffEvidence {
   const rightSections = diffSections(diff);
   const leftSections = new Map<string, string>();
   for (const section of rightSections.values()) {
     const oldPath = /^--- a\/(.+)$/m.exec(section)?.[1].trimEnd();
     if (oldPath) leftSections.set(oldPath, section);
   }
+  const rank = (f: EvidenceAnchor) => SEVERITY_RANK[f.severity ?? "moderate"];
+  const ordered = [...findings].sort((a, b) => rank(a) - rank(b));
 
-  const excerpts = new Set<string>();
+  const excerpts: string[] = [];
+  const shown: { section: string; left: LineRange; right: LineRange }[] = [];
+  const missing = new Set<string>();
   let bytes = 0;
-  let incomplete = false;
-  for (const { file, line, side } of findings) {
+  for (const finding of ordered) {
+    const { file, line, side } = finding;
     const section = (side === "LEFT" ? leftSections : rightSections).get(file);
     if (!section || line === null) {
-      incomplete = true;
+      missing.add(anchorLabel(finding));
       continue;
     }
-
-    const [headers, ...hunks] = section.split(/^(?=@@ )/m);
-    const hunk = hunks.find((text) => {
-      const match = HUNK_HEADER.exec(text);
-      if (!match) return false;
-      const [start, count] = side === "LEFT" ? [match[1], match[2]] : [match[3], match[4]];
-      return line >= Number(start) && line < Number(start) + Number(count ?? 1);
+    const alreadyShown = shown.some((s) => {
+      const [lo, hi] = side === "LEFT" ? s.left : s.right;
+      return s.section === section && line >= lo && line <= hi;
     });
-    if (!hunk) {
-      incomplete = true;
+    if (alreadyShown) continue;
+
+    const [headers, ...hunkTexts] = section.split(/^(?=@@ )/m);
+    let found: { hunk: ParsedHunk; index: number } | undefined;
+    for (const text of hunkTexts) {
+      const hunk = parseHunk(text);
+      const index = hunk ? anchorIndex(hunk, line, side) : -1;
+      if (hunk && index >= 0) {
+        found = { hunk, index };
+        break;
+      }
+    }
+    if (!found) {
+      missing.add(anchorLabel(finding));
       continue;
     }
 
-    const excerpt = headers + hunk;
-    if (excerpts.has(excerpt)) continue;
-    const size = Buffer.byteLength(excerpt);
-    const nextBytes = bytes + size + (excerpts.size > 0 ? 1 : 0);
-    if (size > MAX_EXCERPT_BYTES || nextBytes > MAX_EVIDENCE_BYTES) {
-      incomplete = true;
-      continue;
+    const separator = excerpts.length > 0 ? 1 : 0;
+    let picked = false;
+    for (const context of [Infinity, ...WINDOW_CONTEXT]) {
+      const window = hunkWindow(found.hunk, found.index, context);
+      const excerpt = headers + window.text;
+      const size = Buffer.byteLength(excerpt);
+      if (size > MAX_EXCERPT_BYTES || bytes + separator + size > MAX_EVIDENCE_BYTES) continue;
+      excerpts.push(excerpt);
+      shown.push({ section, left: window.left, right: window.right });
+      bytes += separator + size;
+      picked = true;
+      break;
     }
-    excerpts.add(excerpt);
-    bytes = nextBytes;
+    if (!picked) missing.add(anchorLabel(finding));
   }
-  return { excerpts: [...excerpts], incomplete };
+  return { excerpts, missing: [...missing] };
 }
