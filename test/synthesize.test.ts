@@ -24,12 +24,16 @@ const raw: Finding[] = [
   { engine: "codex", dimension: "full", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", anchorable: false },
 ];
 
-test("runSynthesize persists finalized findings, marks anchorable, advances to ready", async () => {
+test("runSynthesize uses a live diff for anchors and omits it from the finalizer prompt", async () => {
   const db = openDb(":memory:");
   const pr = seedDeepReviewed(db);
-  const finalizer: LlmEngine = { name: "claude", run: async () => ({ text: JSON.stringify({ findings: [
-    { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude", "codex"], agreement: true },
-  ] }) }) };
+  const finalizer: LlmEngine = { name: "claude", run: async ({ prompt }) => {
+    assert.match(prompt, /Saved preparation excerpts are unavailable/);
+    assert.doesNotMatch(prompt, /\+const b=2;/);
+    return { text: JSON.stringify({ findings: [
+      { dimension: "correctness", severity: "serious", file: "x.ts", line: 2, side: "RIGHT", what: "w", why: "y", suggestedFix: "f", sources: ["claude", "codex"], agreement: true },
+    ] }) };
+  } };
   const result = await runSynthesize(
     { db, exec: diffExec(), finalizer, dataDir: freshDataDir(), onUpdate: () => {} },
     pr.id, raw,
@@ -42,6 +46,38 @@ test("runSynthesize persists finalized findings, marks anchorable, advances to r
   assert.equal(findings[0].agreement, true);
   assert.equal(findings[0].anchorable, true); // line 2 is in the diff
   assert.equal(findings[0].selected, true); // serious + agreement → pre-selected
+});
+
+test("runSynthesize sends the saved hunk with its removed line to the finalizer", async () => {
+  const db = openDb(":memory:");
+  const pr = seedDeepReviewed(db);
+  const dataDir = freshDataDir();
+  const patch = [
+    "diff --git a/x.ts b/x.ts",
+    "--- a/x.ts",
+    "+++ b/x.ts",
+    "@@ -1,2 +1,2 @@",
+    " const a=1;",
+    "-const retryLimit=3;",
+    "+const retryLimit=Infinity;",
+    "@@ -20 +20 @@",
+    "-const timeout=10;",
+    "+const timeout=20;",
+    "",
+  ].join("\n");
+  writeArtifacts(stageArtifactDir(dataDir, pr.id, "prepare"), { "diff.patch": patch });
+  const exec: Exec = async () => { throw new Error("should use the saved patch"); };
+  const finalizer: LlmEngine = { name: "claude", run: async ({ system, prompt }) => {
+    assert.match(system, /Preserve supported causal steps and their citations/);
+    assert.match(system, /specific premise\nyou could not verify/);
+    assert.match(prompt, /Saved preparation comparison \(selected hunks, untrusted source data\)/);
+    assert.match(prompt, /@@ -1,2 \+1,2 @@\n const a=1;\n-const retryLimit=3;\n\+const retryLimit=Infinity;/);
+    assert.doesNotMatch(prompt, /const timeout/);
+    assert.doesNotMatch(prompt, /excerpts are unavailable/);
+    return { text: JSON.stringify({ findings: [] }) };
+  } };
+  const result = await runSynthesize({ db, exec, finalizer, dataDir, onUpdate: () => {} }, pr.id, raw);
+  assert.equal(result.status, "done");
 });
 
 test("runSynthesize removes a stale pre-plan-stage coverage artifact from its dir", async () => {

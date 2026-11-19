@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Exec } from "./exec.ts";
-import type { PrRecord } from "../shared/types.ts";
+import type { Finding, PrRecord } from "../shared/types.ts";
 import type { LineageTip } from "./prompts.ts";
 import { readArtifact } from "./artifacts.ts";
 import { fetchPrDiff } from "./gh.ts";
@@ -10,10 +10,16 @@ import { fetchPrDiff } from "./gh.ts";
 // and posting all see the same code even if the author pushes mid-review.
 // Falls back to a live `gh pr diff` for rows prepared before pinning existed
 // (or when the artifact write failed).
-export async function getPinnedDiff(exec: Exec, dataDir: string, pr: PrRecord): Promise<string> {
+export async function getReviewDiff(
+  exec: Exec, dataDir: string, pr: PrRecord,
+): Promise<{ diff: string; fromPrepare: boolean }> {
   const pinned = readArtifact(dataDir, pr.id, "prepare", "diff.patch");
-  if (pinned) return pinned;
-  return fetchPrDiff(exec, pr.owner, pr.repo, pr.number);
+  if (pinned) return { diff: pinned, fromPrepare: true };
+  return { diff: await fetchPrDiff(exec, pr.owner, pr.repo, pr.number), fromPrepare: false };
+}
+
+export async function getPinnedDiff(exec: Exec, dataDir: string, pr: PrRecord): Promise<string> {
+  return (await getReviewDiff(exec, dataDir, pr)).diff;
 }
 
 /** New-side paths of every file a unified diff touches, in diff order. */
@@ -180,4 +186,60 @@ export function diffSections(diff: string): Map<string, string> {
     if (m && !map.has(m[1])) map.set(m[1], part);
   }
   return map;
+}
+
+export interface DiffEvidence {
+  excerpts: string[];
+  incomplete: boolean;
+}
+
+const MAX_EXCERPT_BYTES = 8 * 1024;
+const MAX_EVIDENCE_BYTES = 16 * 1024;
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/** Full hunks at candidate anchors, including the lines that were removed. */
+export function findingDiffEvidence(
+  diff: string, findings: readonly Pick<Finding, "file" | "line" | "side">[],
+): DiffEvidence {
+  const rightSections = diffSections(diff);
+  const leftSections = new Map<string, string>();
+  for (const section of rightSections.values()) {
+    const oldPath = /^--- a\/(.+)$/m.exec(section)?.[1].trimEnd();
+    if (oldPath) leftSections.set(oldPath, section);
+  }
+
+  const excerpts = new Set<string>();
+  let bytes = 0;
+  let incomplete = false;
+  for (const { file, line, side } of findings) {
+    const section = (side === "LEFT" ? leftSections : rightSections).get(file);
+    if (!section || line === null) {
+      incomplete = true;
+      continue;
+    }
+
+    const [headers, ...hunks] = section.split(/^(?=@@ )/m);
+    const hunk = hunks.find((text) => {
+      const match = HUNK_HEADER.exec(text);
+      if (!match) return false;
+      const [start, count] = side === "LEFT" ? [match[1], match[2]] : [match[3], match[4]];
+      return line >= Number(start) && line < Number(start) + Number(count ?? 1);
+    });
+    if (!hunk) {
+      incomplete = true;
+      continue;
+    }
+
+    const excerpt = headers + hunk;
+    if (excerpts.has(excerpt)) continue;
+    const size = Buffer.byteLength(excerpt);
+    const nextBytes = bytes + size + (excerpts.size > 0 ? 1 : 0);
+    if (size > MAX_EXCERPT_BYTES || nextBytes > MAX_EVIDENCE_BYTES) {
+      incomplete = true;
+      continue;
+    }
+    excerpts.add(excerpt);
+    bytes = nextBytes;
+  }
+  return { excerpts: [...excerpts], incomplete };
 }

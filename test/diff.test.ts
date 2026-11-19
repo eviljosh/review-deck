@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, insertPr } from "../src/server/db.ts";
 import type { Exec } from "../src/server/exec.ts";
-import { getPinnedDiff, diffStats, pickPinnedBase, baseDriftFiles, dropDiffFiles, baseLabel, diffPaths } from "../src/server/diff.ts";
+import { getPinnedDiff, diffStats, pickPinnedBase, baseDriftFiles, dropDiffFiles, baseLabel, diffPaths, findingDiffEvidence } from "../src/server/diff.ts";
 import { stageArtifactDir, writeArtifacts } from "../src/server/artifacts.ts";
 
 function seed() {
@@ -25,6 +25,38 @@ test("getPinnedDiff falls back to gh pr diff when no artifact exists", async () 
   const exec: Exec = async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: "live diff", stderr: "" }; };
   assert.equal(await getPinnedDiff(exec, dataDir, pr), "live diff");
   assert.deepEqual(calls[0], ["gh", "pr", "diff", "5", "--repo", "o/r"]);
+});
+
+test("findingDiffEvidence matches both sides of a renamed file and deduplicates the hunk", () => {
+  const headers = "diff --git a/old.ts b/new.ts\n--- a/old.ts\n+++ b/new.ts\n";
+  const first = "@@ -8,2 +9,2 @@\n-old value\n+new value\n context\n";
+  const second = "@@ -27 +28,0 @@\n-removed elsewhere\n";
+  const diff = headers + first + second;
+
+  assert.deepEqual(findingDiffEvidence(diff, [
+    { file: "new.ts", line: 10, side: "RIGHT" },
+    { file: "old.ts", line: 8, side: "LEFT" },
+  ]), { excerpts: [headers + first], incomplete: false });
+
+  assert.deepEqual(findingDiffEvidence(diff, [
+    { file: "new.ts", line: 28, side: "RIGHT" },
+    { file: "other.ts", line: 9, side: "RIGHT" },
+    { file: "new.ts", line: null, side: "RIGHT" },
+  ]), { excerpts: [], incomplete: true });
+});
+
+test("findingDiffEvidence skips entire hunks that exceed either byte budget", () => {
+  const file = (path: string, added: string) =>
+    `diff --git a/${path} b/${path}\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+${added}\n`;
+  const oversized = file("oversized.ts", "é".repeat(4500));
+  const large = ["a.ts", "b.ts", "c.ts"].map((path) => file(path, "x".repeat(6000)));
+  const small = file("small.ts", "small");
+  const evidence = findingDiffEvidence(
+    oversized + large.join("") + small,
+    ["oversized.ts", "a.ts", "b.ts", "c.ts", "small.ts"].map((path) =>
+      ({ file: path, line: 1, side: "RIGHT" })),
+  );
+  assert.deepEqual(evidence, { excerpts: [...large.slice(0, 2), small], incomplete: true });
 });
 
 test("diffStats counts content lines and files, ignoring +++/--- headers", () => {

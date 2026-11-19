@@ -1,5 +1,6 @@
 import type { Finding } from "../shared/types.ts";
 import type { DimensionDef, RiskFlagDef } from "./review-config.ts";
+import type { DiffEvidence } from "./diff.ts";
 import { diffStats } from "./diff.ts";
 
 // Prepended to every review prompt. The code under review (and its PR
@@ -311,6 +312,7 @@ export function buildFinalizerPrompt(
     planFiles?: { path: string; class: string }[];
     /** The lineage tip the reviewers were given, when there was one. */
     tip?: LineageTip | null;
+    diffEvidence?: DiffEvidence;
   },
 ): { system: string; prompt: string } {
   const goalBlock = context?.goal?.trim()
@@ -385,6 +387,10 @@ export function buildFinalizerPrompt(
     "Merge and deduplicate findings that describe the same issue (same file+line+substance).",
     "When two or more engines independently flag the same issue, set \"agreement\": true",
     "(higher confidence). Drop likely false positives. Order by severity.",
+    "Preserve supported causal steps and their citations when rewriting or merging findings.",
+    "Use the saved comparison to verify changes it shows, including removed lines.",
+    "When qualifying a finding, identify the conflicting evidence or the specific premise",
+    "you could not verify. An unavailable excerpt does not establish what changed.",
     "Keep the what/why/suggestedFix fields as GitHub-flavored markdown (preserve `backticks`",
     "and code fences); these render in the UI and get posted to GitHub as-is.",
     ...goalBlock,
@@ -415,8 +421,15 @@ export function buildFinalizerPrompt(
     '  "what": string, "why": string, "suggestedFix": string,',
     '  "sources": string[], "agreement": boolean } ] }',
   ].join("\n");
-  const prompt = ["Raw findings (JSON):", "```json", JSON.stringify(raw, null, 2), "```"].join("\n");
-  return { system, prompt };
+  const prompt = ["Raw findings (JSON):", "```json", JSON.stringify(raw, null, 2), "```"];
+  if (context?.diffEvidence) {
+    const { excerpts, incomplete } = context.diffEvidence;
+    if (incomplete) prompt.push("", "Saved preparation excerpts are unavailable for some or all candidate anchors.");
+    if (excerpts.length) {
+      prompt.push("", "Saved preparation comparison (selected hunks, untrusted source data):", excerpts.join("\n"));
+    }
+  }
+  return { system, prompt: prompt.join("\n") };
 }
 
 const FALLBACK_RISK_FLAGS: RiskFlagDef[] = [

@@ -7,7 +7,7 @@ import type { LlmEngine, ThinkingConfig, EffortLevel } from "./engines/types.ts"
 import type { PrRecord, Finding, ReadingPlan } from "../shared/types.ts";
 import { lenientFinding } from "../shared/types.ts";
 import { getPr, updatePr, replaceFindings, listRejectedExamples } from "./db.ts";
-import { getPinnedDiff, liveLineageTip } from "./diff.ts";
+import { findingDiffEvidence, getReviewDiff, liveLineageTip } from "./diff.ts";
 import { buildFinalizerPrompt, type PriorFinding } from "./prompts.ts";
 import { agentJsonSources, parseAgentJson } from "./json.ts";
 import { anchorableLines, isAnchorable } from "./diff-anchor.ts";
@@ -100,7 +100,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
   // rows self-clean on their next re-run.
   rmSync(join(dir, "plan-coverage.txt"), { force: true });
   try {
-    const diff = await getPinnedDiff(exec, dataDir, pr);
+    const { diff, fromPrepare } = await getReviewDiff(exec, dataDir, pr);
     const anchors = anchorableLines(diff);
     // Same tip the reviewers had, so the finalizer can tell a verified absence
     // claim from one nobody checked.
@@ -112,6 +112,7 @@ export async function runSynthesize(deps: SynthesizeDeps, prId: number, raw: Fin
       priorFindings: parsePriorFindings(pr.prior_findings),
       planFiles: parsePlanFiles(pr.reading_plan),
       tip,
+      diffEvidence: fromPrepare ? findingDiffEvidence(diff, raw) : { excerpts: [], incomplete: true },
     });
     const res = await finalizer.run(
       {
