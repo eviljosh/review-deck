@@ -106,7 +106,7 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   // PRs trips subscription rate limits, lower maxConcurrentPipelines (2–3).
   maxConcurrentReviews: 4,
   maxConcurrentPipelines: 4,
-  claudeModel: "claude-opus-5-5",
+  claudeModel: "sonnet",
   claudeTransport: "sdk",
   claudeCliAuth: "env",
   codexModel: "gpt-6.1-sol",

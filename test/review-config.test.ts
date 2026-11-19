@@ -14,7 +14,7 @@ test("default config enables both engines, all dimensions, claude finalizer", ()
   assert.equal(DEFAULT_REVIEW_CONFIG.finalizerEffort, "high");
   assert.equal(DEFAULT_REVIEW_CONFIG.maxConcurrentReviews, 4);
   assert.equal(DEFAULT_REVIEW_CONFIG.maxConcurrentPipelines, 4);
-  assert.equal(DEFAULT_REVIEW_CONFIG.claudeModel, "claude-opus-5-5");
+  assert.equal(DEFAULT_REVIEW_CONFIG.claudeModel, "sonnet");
   assert.equal(DEFAULT_REVIEW_CONFIG.engineTimeoutMs, 600_000);
 });
 
@@ -46,8 +46,8 @@ test("parseDimensions / parseRiskFlags accept valid JSON overrides and reject ju
   assert.equal(parseRiskFlags('[{"nope": true}]'), null);
 });
 
-test("engineModelOptions: claude gets its pinned model", () => {
-  assert.deepEqual(engineModelOptions(DEFAULT_REVIEW_CONFIG, "claude"), { model: "claude-opus-5-5" });
+test("engineModelOptions: claude gets the configured Sonnet alias", () => {
+  assert.deepEqual(engineModelOptions(DEFAULT_REVIEW_CONFIG, "claude"), { model: "sonnet" });
 });
 
 test("engineModelOptions: codex pins model and medium reasoning effort", () => {

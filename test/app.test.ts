@@ -585,7 +585,7 @@ test("GET /api/prs/:id/runs/:rid/output returns the persisted stream + error", a
 test("GET/PUT /api/settings round-trips a config patch", async () => {
   const app = buildApp(deps());
   const before = await app.inject({ method: "GET", url: "/api/settings" });
-  assert.equal(before.json().claudeModel, "claude-opus-5-5");
+  assert.equal(before.json().claudeModel, "sonnet");
 
   const put = await app.inject({ method: "PUT", url: "/api/settings", payload: { claudeModel: "sonnet", robotMarker: "🤖 mine" } });
   assert.equal(put.statusCode, 200);

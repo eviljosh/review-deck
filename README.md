@@ -80,9 +80,10 @@ The Claude reviewer runs through the Claude Agent SDK. Credentials are resolved 
 
 The server logs which path it picked at startup (`claude auth: …`).
 
-The default Claude model is pinned to `claude-opus-5-5`, with the Agent SDK pinned
-to `0.3.312`. You can change the model in **⚙ Settings → Claude model**; an alias
-such as `opus` follows the version selected by the installed SDK or CLI.
+The default Claude model is `sonnet` to keep review costs down, with the Agent SDK
+pinned to `0.3.312`. The alias follows the Sonnet version selected by the installed
+SDK or CLI. This applies to all Claude review stages, including finalization. You
+can override it in **⚙ Settings → Claude model** when a review needs another model.
 
 #### Claude transport: Agent SDK vs. `claude -p`
 
@@ -122,8 +123,8 @@ to use the corresponding value from `~/.codex/config.toml`.
 
 Saved settings override the code defaults. Saving **⚙ Settings** stores every
 field, so an installation that has ever saved them keeps its **Claude model**
-(typically `opus`); set it to `claude-opus-5-5` to adopt the pin. A blank **Codex model**
-was never stored, so installations without an explicit Codex model move to
+(for example, `opus` or `claude-opus-5-5`); set it to `sonnet` to adopt the cheaper
+default. A blank **Codex model** was never stored, so installations without an explicit Codex model move to
 `gpt-6.1-sol` automatically; clear the field and save to keep inheriting from
 `~/.codex/config.toml`.
 
