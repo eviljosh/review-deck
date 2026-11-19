@@ -40,9 +40,9 @@ run cancellation, archive (with a 30-day purge and worktree cleanup), a seen/uns
 an "⇡ new commits" staleness badge, danger/recent/repo sorting, and keyboard nav
 (`j`/`k`/`o`/`esc`).
 
-The supervisor can use `POST /api/prs/:id/restart` to restart a failed attempt from prepare with the observed head, base, and update timestamp. Missing head/base pins are supported for incomplete preparation; a null head is accepted only in the prepare stage. The endpoint atomically rejects changed, active, or archived attempts and preserves prior review history.
+Other services can use `POST /api/prs/:id/restart` to restart a failed attempt from prepare with the observed head, base, and update timestamp. Missing head/base pins are supported for incomplete preparation; a null head is accepted only in the prepare stage. The endpoint atomically rejects changed, active, or archived attempts and preserves prior review history.
 
-On startup, interrupted running jobs and unarchived pending jobs are marked failed and retryable. Pending jobs belonged to the previous process's in-memory queue; they cannot make progress after a restart. The supervisor can recover these through its bounded preparation restart. Live queued jobs are not reclaimed based on elapsed time.
+On startup, interrupted running jobs and unarchived pending jobs are marked failed and retryable. Pending jobs belonged to the previous process's in-memory queue; they cannot make progress after a restart. Other services can recover these through the guarded restart endpoint. Live queued jobs are not reclaimed based on elapsed time.
 
 ## Prerequisites
 
@@ -249,4 +249,4 @@ preconditions return 400. The server also refuses while a pipeline controller is
 still active. Prior metadata/findings are saved under the PR's artifacts in a
 `restart-history-*` directory, and prior posted findings remain available to synthesis.
 The new pipeline still stops at the human posting gate. Restart the server to load
-this endpoint before using it from review-supervisor.
+this endpoint before calling it from other services.
